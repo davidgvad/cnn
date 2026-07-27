@@ -15,6 +15,7 @@ What stays ON by default
 - Class-balanced focal loss with best sweep defaults:
     cb_beta = 0.9999
     focal_gamma = 1.5
+- Each training batch includes R2L and U2R by default
 - groups configurable (groups=1 => standard conv; groups>1 => grouped conv)
 
 Recommended workflow
@@ -183,6 +184,88 @@ class ValF1Callback(tf.keras.callbacks.Callback):
         print(f" — val_macro_f1: {macro_f1:.4f} — val_rare_f1: {rare_f1:.4f}", flush=True)
 
 
+class BalancedBatchSequence(tf.keras.utils.Sequence):
+    """Create batches that always include R2L and U2R samples when available."""
+
+    def __init__(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        batch_size: int,
+        minority_per_batch: int = 1,
+        seed: int = 0,
+    ) -> None:
+        super().__init__()
+        self.X = X
+        self.y = np.asarray(y)
+        self.batch_size = int(batch_size)
+        self.minority_per_batch = int(minority_per_batch)
+        self.seed = int(seed)
+        self.epoch = 0
+
+        if len(self.X) != len(self.y):
+            raise ValueError("X and y must contain the same number of samples.")
+        if len(self.y) == 0:
+            raise ValueError("Training data cannot be empty.")
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0.")
+        if self.minority_per_batch <= 0:
+            raise ValueError("minority_per_batch must be greater than 0.")
+
+        # NSL-KDD labels: 2 = R2L and 3 = U2R.
+        self.minority_indices = {
+            class_id: np.flatnonzero(self.y == class_id) for class_id in (2, 3)
+        }
+        self.available_minority_classes = [
+            class_id for class_id, indices in self.minority_indices.items() if len(indices) > 0
+        ]
+
+        guaranteed_count = self.minority_per_batch * len(self.available_minority_classes)
+        if guaranteed_count > self.batch_size:
+            raise ValueError(
+                "batch_size is too small for the requested minority samples per batch."
+            )
+
+        self.all_indices = np.arange(len(self.y))
+        self.steps_per_epoch = int(np.ceil(len(self.y) / self.batch_size))
+
+    def __len__(self) -> int:
+        return self.steps_per_epoch
+
+    def __getitem__(self, batch_index: int) -> Tuple[np.ndarray, np.ndarray]:
+        if batch_index < 0 or batch_index >= len(self):
+            raise IndexError("Batch index is out of range.")
+
+        # A repeatable but different random selection for every batch and epoch.
+        rng = np.random.default_rng(
+            self.seed + self.epoch * self.steps_per_epoch + int(batch_index)
+        )
+
+        selected: List[int] = []
+        for class_id in self.available_minority_classes:
+            class_indices = self.minority_indices[class_id]
+            chosen = rng.choice(
+                class_indices,
+                size=self.minority_per_batch,
+                replace=len(class_indices) < self.minority_per_batch,
+            )
+            selected.extend(chosen.tolist())
+
+        # Fill the rest of the batch from the complete training set.
+        remaining = self.batch_size - len(selected)
+        if remaining > 0:
+            selected.extend(
+                rng.choice(self.all_indices, size=remaining, replace=True).tolist()
+            )
+
+        batch_indices = np.asarray(selected, dtype=np.int64)
+        rng.shuffle(batch_indices)
+        return self.X[batch_indices], self.y[batch_indices]
+
+    def on_epoch_end(self) -> None:
+        self.epoch += 1
+
+
 def build_opt_cnn(
     loss: tf.keras.losses.Loss,
     groups: int = 1,
@@ -277,6 +360,12 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--val-split", type=float, default=0.20)
+    parser.add_argument(
+        "--minority-per-batch",
+        type=int,
+        default=1,
+        help="Guaranteed R2L and U2R samples per training batch. Use 0 for ordinary batching.",
+    )
 
     # Focal (best sweep defaults)
     parser.add_argument("--focal-gamma", type=float, default=1.5)
@@ -316,6 +405,8 @@ def main() -> None:
     parser.add_argument("--no-residual", action="store_true")
 
     args = parser.parse_args()
+    if args.minority_per_batch < 0:
+        parser.error("--minority-per-batch must be 0 or greater.")
 
     tf.keras.utils.set_random_seed(args.seed)
     np.random.seed(args.seed)
@@ -474,15 +565,35 @@ def main() -> None:
         ),
     ]
 
-    history = model.fit(
-        X_tr,
-        y_tr,
-        validation_data=(X_val, y_val),
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        verbose=1,
-        callbacks=callbacks,
-    )
+    if args.minority_per_batch > 0:
+        train_batches = BalancedBatchSequence(
+            X=X_tr,
+            y=y_tr,
+            batch_size=args.batch_size,
+            minority_per_batch=args.minority_per_batch,
+            seed=args.seed,
+        )
+        print(
+            f"Balanced batches enabled: at least {args.minority_per_batch} R2L "
+            f"and {args.minority_per_batch} U2R sample(s) per batch."
+        )
+        history = model.fit(
+            train_batches,
+            validation_data=(X_val, y_val),
+            epochs=args.epochs,
+            verbose=1,
+            callbacks=callbacks,
+        )
+    else:
+        history = model.fit(
+            X_tr,
+            y_tr,
+            validation_data=(X_val, y_val),
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            verbose=1,
+            callbacks=callbacks,
+        )
 
     save_training_plot(history, paths.results_dir, prefix)
 
@@ -521,6 +632,7 @@ def main() -> None:
         f.write(f"aug_counts: {aug_counts.tolist()}\n\n")
         f.write(f"focal_gamma: {args.focal_gamma}\n")
         f.write(f"cb_beta: {args.cb_beta}\n")
+        f.write(f"minority_per_batch: {args.minority_per_batch}\n")
         f.write(f"alpha_counts(train_split): {alpha_counts.tolist()}\n")
         f.write(f"alpha: {[float(x) for x in alpha.tolist()]}\n\n")
         f.write(f"groups: {args.groups}\n")
@@ -553,5 +665,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
