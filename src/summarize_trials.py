@@ -65,6 +65,11 @@ def _parse_key_value(lines: List[str]) -> Dict[str, Any]:
             "groups",
             "base_filters",
             "dense_units",
+            "dropout1",
+            "dropout2",
+            "minority_per_batch",
+            "seed",
+            "Best Validation Macro F1",
         }:
             # numeric fields
             f = _safe_float(val)
@@ -173,16 +178,11 @@ def parse_results_file(path: Path) -> ParsedRun:
         except Exception:
             pass
 
-    # Convenience aliases
-    if "macro_avg_f1" not in data and "macro_avg_f1" in data:
-        pass
-    # Macro-F1 / macro-recall are the key imbalance-aware metrics
-    if "macro_avg_f1" not in data and "macro_avg_f1" in data:
-        data["macro_f1"] = data["macro_avg_f1"]
-    else:
-        data["macro_f1"] = data.get("macro_avg_f1")
+    # Convenience aliases for ranking and grouping.
+    data["macro_f1"] = data.get("macro_avg_f1")
     data["macro_recall"] = data.get("macro_avg_recall")
     data["mcc"] = data.get("MCC")
+    data["val_macro_f1"] = data.get("Best Validation Macro F1")
 
     return ParsedRun(path=path, data=data)
 
@@ -249,6 +249,7 @@ def main() -> None:
 
         # Core metrics to summarize
         for m in [
+            "val_macro_f1",
             "macro_f1",
             "macro_recall",
             "mcc",
@@ -279,22 +280,23 @@ def main() -> None:
     print(f"Top {min(args.top, len(summary_rows))} configs by {metric_mean_key}:")
 
     for i, r in enumerate(summary_rows[: args.top], start=1):
-        cb_beta = r.get("cb_beta")
-        gamma = r.get("focal_gamma")
-        groups_v = r.get("groups")
         n = r.get("n")
         score = r.get(metric_mean_key)
         score_std = r.get(f"{args.metric}_std")
         r2l = r.get("R2L_f1_mean")
         u2r = r.get("U2R_f1_mean")
+        config = " ".join(f"{field}={r.get(field)}" for field in args.group_by)
+        score_text = (
+            "missing"
+            if score is None
+            else f"{score:.4f}±{(score_std or 0.0):.4f}"
+        )
         print(
-            f"{i:>2}. cb_beta={cb_beta} gamma={gamma} groups={groups_v} n={n} "
-            f"{args.metric}={score:.4f}±{(score_std or 0.0):.4f}  "
+            f"{i:>2}. {config} n={n} {args.metric}={score_text}  "
             f"R2L_f1={None if r2l is None else f'{r2l:.3f}'}  U2R_f1={None if u2r is None else f'{u2r:.3f}'}"
         )
 
 
 if __name__ == "__main__":
     main()
-
 
