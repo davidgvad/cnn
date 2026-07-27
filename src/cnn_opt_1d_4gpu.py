@@ -12,13 +12,12 @@ Run:
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.metrics import accuracy_score, classification_report, matthews_corrcoef
+from sklearn.metrics import accuracy_score, classification_report, f1_score, matthews_corrcoef
 from sklearn.model_selection import train_test_split
 
 from cnn_gan_foc import (  # type: ignore
@@ -342,6 +341,7 @@ def main() -> None:
             use_batch_norm=not args.no_bn,
             use_residual=not args.no_residual,
         )
+    model_parameters = int(model.count_params())
 
     weights_path = paths.model_dir / f"{prefix}_best.weights.h5"
     model_path = paths.model_dir / f"{prefix}_best.keras"
@@ -401,8 +401,9 @@ def main() -> None:
     predictions = np.argmax(probabilities, axis=1)
 
     report = classification_report(
-        y_test, predictions, digits=4, target_names=CLASS_NAMES
+        y_test, predictions, digits=8, target_names=CLASS_NAMES
     )
+    test_macro_f1 = float(f1_score(y_test, predictions, average="macro"))
     mcc = matthews_corrcoef(y_test, predictions)
     sklearn_accuracy = accuracy_score(y_test, predictions)
 
@@ -430,6 +431,8 @@ def main() -> None:
         output_file.write("CNN_OPT 1D with mirrored multi-GPU training\n\n")
         output_file.write(f"run_name: {prefix}\n")
         output_file.write(f"seed: {args.seed}\n")
+        output_file.write(f"epochs: {args.epochs}\n")
+        output_file.write(f"val_split: {args.val_split}\n")
         output_file.write(f"num_gpus: {args.num_gpus}\n")
         output_file.write(f"global_batch_size: {args.batch_size}\n")
         output_file.write(
@@ -457,6 +460,7 @@ def main() -> None:
         output_file.write(f"dropout2: {args.dropout2}\n")
         output_file.write(f"use_batch_norm: {not args.no_bn}\n")
         output_file.write(f"use_residual: {not args.no_residual}\n")
+        output_file.write(f"Model Parameters: {model_parameters}\n")
         output_file.write(
             f"Best Validation Macro F1: {best_val_macro_f1}\n\n"
         )
@@ -465,6 +469,7 @@ def main() -> None:
         output_file.write(
             f"Test Accuracy (sklearn): {sklearn_accuracy}\n"
         )
+        output_file.write(f"Test Macro F1: {test_macro_f1}\n")
         output_file.write(f"MCC: {mcc}\n\n")
         output_file.write("Classification report:\n")
         output_file.write(report)
@@ -473,7 +478,9 @@ def main() -> None:
     print("\n=== CNN_OPT 1D Multi-GPU Test Results ===")
     print(f"Test loss: {test_loss:.6f}")
     print(f"Test accuracy: {test_accuracy:.6f}")
+    print(f"Test macro-F1: {test_macro_f1:.6f}")
     print(f"MCC: {mcc:.6f}")
+    print(f"Model parameters: {model_parameters}")
     print(f"Best validation macro-F1: {best_val_macro_f1:.6f}")
     print(report)
     print("Saved results:", result_path)

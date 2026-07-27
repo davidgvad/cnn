@@ -17,7 +17,7 @@ import re
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,7 @@ def _parse_key_value(lines: List[str]) -> Dict[str, Any]:
             "Test Loss",
             "Test Accuracy (keras)",
             "Test Accuracy (sklearn)",
+            "Test Macro F1",
             "MCC",
             "groups",
             "base_filters",
@@ -69,6 +70,12 @@ def _parse_key_value(lines: List[str]) -> Dict[str, Any]:
             "dropout2",
             "minority_per_batch",
             "seed",
+            "epochs",
+            "batch_size",
+            "global_batch_size",
+            "num_gpus",
+            "val_split",
+            "Model Parameters",
             "Best Validation Macro F1",
         }:
             # numeric fields
@@ -179,7 +186,7 @@ def parse_results_file(path: Path) -> ParsedRun:
             pass
 
     # Convenience aliases for ranking and grouping.
-    data["macro_f1"] = data.get("macro_avg_f1")
+    data["macro_f1"] = data.get("Test Macro F1", data.get("macro_avg_f1"))
     data["macro_recall"] = data.get("macro_avg_recall")
     data["mcc"] = data.get("MCC")
     data["val_macro_f1"] = data.get("Best Validation Macro F1")
@@ -299,4 +306,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

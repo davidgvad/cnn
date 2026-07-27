@@ -542,6 +542,7 @@ def main() -> None:
         use_batch_norm=not args.no_bn,
         use_residual=not args.no_residual,
     )
+    model_parameters = int(model.count_params())
 
     prefix = args.run_name.strip() or "opt"
     weights_path = paths.model_dir / f"{prefix}_best.weights.h5"
@@ -601,13 +602,15 @@ def main() -> None:
     if weights_path.exists():
         model.load_weights(weights_path)
     model.save(model_path)
+    best_val_macro_f1 = max(history.history.get("val_macro_f1", [0.0]))
 
     # Evaluate on test
     loss, acc = model.evaluate(X_test, y_test, verbose=0)
     y_proba = model.predict(X_test, verbose=0)
     y_pred = np.argmax(y_proba, axis=1)
 
-    report = classification_report(y_test, y_pred, digits=4, target_names=CLASS_NAMES)
+    report = classification_report(y_test, y_pred, digits=8, target_names=CLASS_NAMES)
+    test_macro_f1 = float(f1_score(y_test, y_pred, average="macro"))
     mcc = matthews_corrcoef(y_test, y_pred)
     acc_sklearn = accuracy_score(y_test, y_pred)
 
@@ -623,6 +626,10 @@ def main() -> None:
     with out_txt.open("w", encoding="utf-8") as f:
         f.write("CNN_OPT (Optimized feature layout + CTGAN + Focal)\n\n")
         f.write(f"run_name: {prefix}\n")
+        f.write(f"seed: {args.seed}\n")
+        f.write(f"epochs: {args.epochs}\n")
+        f.write(f"batch_size: {args.batch_size}\n")
+        f.write(f"val_split: {args.val_split}\n")
         f.write(f"feature_layout: {args.feature_layout}\n")
         f.write(f"feature_grid_tsv: {grid_path}\n\n")
         f.write(f"synth_path: {synth_path}\n")
@@ -638,11 +645,16 @@ def main() -> None:
         f.write(f"groups: {args.groups}\n")
         f.write(f"base_filters: {args.base_filters}\n")
         f.write(f"dense_units: {args.dense_units}\n")
+        f.write(f"dropout1: {args.dropout1}\n")
+        f.write(f"dropout2: {args.dropout2}\n")
         f.write(f"use_batch_norm: {not args.no_bn}\n")
         f.write(f"use_residual: {not args.no_residual}\n\n")
+        f.write(f"Model Parameters: {model_parameters}\n")
+        f.write(f"Best Validation Macro F1: {best_val_macro_f1}\n\n")
         f.write(f"Test Loss: {loss}\n")
         f.write(f"Test Accuracy (keras): {acc}\n")
         f.write(f"Test Accuracy (sklearn): {acc_sklearn}\n")
+        f.write(f"Test Macro F1: {test_macro_f1}\n")
         f.write(f"MCC: {mcc}\n\n")
         f.write("Classification report:\n")
         f.write(report)
@@ -657,7 +669,10 @@ def main() -> None:
     print("Alpha:", alpha)
     print(f"Test loss: {loss:.6f}")
     print(f"Test accuracy: {acc:.6f}")
+    print(f"Test macro-F1: {test_macro_f1:.6f}")
     print(f"MCC: {mcc:.6f}")
+    print(f"Model parameters: {model_parameters}")
+    print(f"Best validation macro-F1: {best_val_macro_f1:.6f}")
     print(report)
     print(f"\nSaved: {out_txt}")
     print(f"Saved model: {model_path}")
