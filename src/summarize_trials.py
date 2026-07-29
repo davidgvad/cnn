@@ -62,6 +62,15 @@ def _parse_key_value(lines: List[str]) -> Dict[str, Any]:
             "Test Accuracy (keras)",
             "Test Accuracy (sklearn)",
             "Test Macro F1",
+            "Test Macro Recall",
+            "R2L Recall",
+            "U2R Recall",
+            "Raw Argmax Test Accuracy",
+            "Raw Argmax Test Macro F1",
+            "Raw Argmax Test Macro Recall",
+            "Raw Argmax R2L Recall",
+            "Raw Argmax U2R Recall",
+            "Raw Argmax MCC",
             "MCC",
             "groups",
             "base_filters",
@@ -77,6 +86,13 @@ def _parse_key_value(lines: List[str]) -> Dict[str, Any]:
             "val_split",
             "Model Parameters",
             "Best Validation Macro F1",
+            "r2l_threshold",
+            "u2r_threshold",
+            "threshold_changed_predictions",
+            "r2l_rejections",
+            "u2r_rejections",
+            "r2l_gains_from_rerouting",
+            "u2r_gains_from_rerouting",
         }:
             # numeric fields
             f = _safe_float(val)
@@ -187,7 +203,10 @@ def parse_results_file(path: Path) -> ParsedRun:
 
     # Convenience aliases for ranking and grouping.
     data["macro_f1"] = data.get("Test Macro F1", data.get("macro_avg_f1"))
-    data["macro_recall"] = data.get("macro_avg_recall")
+    data["raw_macro_f1"] = data.get("Raw Argmax Test Macro F1")
+    data["macro_recall"] = data.get("Test Macro Recall", data.get("macro_avg_recall"))
+    data["R2L_recall"] = data.get("R2L Recall", data.get("R2L_recall"))
+    data["U2R_recall"] = data.get("U2R Recall", data.get("U2R_recall"))
     data["mcc"] = data.get("MCC")
     data["val_macro_f1"] = data.get("Best Validation Macro F1")
 

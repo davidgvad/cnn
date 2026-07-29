@@ -17,6 +17,9 @@ What stays ON by default
     focal_gamma = 1.5
 - Each training batch includes R2L and U2R by default
 - groups configurable (groups=1 => standard conv; groups>1 => grouped conv)
+- Fixed post-training rejection thresholds:
+    R2L = 0.55
+    U2R = 0.40
 
 Recommended workflow
 --------------------
@@ -40,7 +43,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from sklearn.metrics import accuracy_score, classification_report, f1_score, matthews_corrcoef
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    f1_score,
+    matthews_corrcoef,
+    recall_score,
+)
 from sklearn.model_selection import train_test_split
 
 # Reuse the proven preprocessing + CTGAN utilities from `cnn_gan_foc.py`
@@ -182,6 +191,48 @@ class ValF1Callback(tf.keras.callbacks.Callback):
         logs["val_rare_f1"] = rare_f1
 
         print(f" — val_macro_f1: {macro_f1:.4f} — val_rare_f1: {rare_f1:.4f}", flush=True)
+
+
+def apply_prediction_thresholds(
+    y_proba: np.ndarray,
+    class_thresholds: Dict[int, float],
+) -> np.ndarray:
+    """
+    Reject a thresholded class when its probability is too low.
+
+    Classes are considered from highest to lowest probability. R2L and U2R
+    must pass their configured thresholds; classes without a threshold are
+    accepted normally.
+    """
+    probabilities = np.asarray(y_proba)
+    if probabilities.ndim != 2:
+        raise ValueError(
+            f"Expected a 2D probability array, got shape {probabilities.shape}."
+        )
+
+    for class_id, threshold in class_thresholds.items():
+        if class_id < 0 or class_id >= probabilities.shape[1]:
+            raise ValueError(f"Threshold class ID is out of range: {class_id}")
+        if not 0.0 <= float(threshold) <= 1.0:
+            raise ValueError(
+                f"Threshold for class {class_id} must be between 0 and 1."
+            )
+
+    ranked_classes = np.argsort(probabilities, axis=1)[:, ::-1]
+    predictions = np.empty(len(probabilities), dtype=np.int64)
+
+    for row_index, ranking in enumerate(ranked_classes):
+        # At least one of the unthresholded classes will normally be accepted.
+        selected_class = int(ranking[0])
+        for class_id_raw in ranking:
+            class_id = int(class_id_raw)
+            threshold = class_thresholds.get(class_id)
+            if threshold is None or probabilities[row_index, class_id] >= threshold:
+                selected_class = class_id
+                break
+        predictions[row_index] = selected_class
+
+    return predictions
 
 
 class BalancedBatchSequence(tf.keras.utils.Sequence):
@@ -404,9 +455,22 @@ def main() -> None:
     parser.add_argument("--no-bn", action="store_true")
     parser.add_argument("--no-residual", action="store_true")
 
+    # Fixed post-training decision policy from the final pipeline.
+    parser.add_argument("--r2l-threshold", type=float, default=0.55)
+    parser.add_argument("--u2r-threshold", type=float, default=0.40)
+    parser.add_argument(
+        "--no-thresholds",
+        action="store_true",
+        help="Use ordinary argmax predictions instead of the fixed R2L/U2R thresholds.",
+    )
+
     args = parser.parse_args()
     if args.minority_per_batch < 0:
         parser.error("--minority-per-batch must be 0 or greater.")
+    if not 0.0 <= args.r2l_threshold <= 1.0:
+        parser.error("--r2l-threshold must be between 0 and 1.")
+    if not 0.0 <= args.u2r_threshold <= 1.0:
+        parser.error("--u2r-threshold must be between 0 and 1.")
 
     tf.keras.utils.set_random_seed(args.seed)
     np.random.seed(args.seed)
@@ -604,16 +668,71 @@ def main() -> None:
     model.save(model_path)
     best_val_macro_f1 = max(history.history.get("val_macro_f1", [0.0]))
 
-    # Evaluate on test
-    loss, acc = model.evaluate(X_test, y_test, verbose=0)
+    # Evaluate raw Softmax predictions, then apply the fixed deployment policy.
+    loss, keras_argmax_acc = model.evaluate(X_test, y_test, verbose=0)
     y_proba = model.predict(X_test, verbose=0)
-    y_pred = np.argmax(y_proba, axis=1)
+    raw_y_pred = np.argmax(y_proba, axis=1)
 
-    report = classification_report(y_test, y_pred, digits=8, target_names=CLASS_NAMES)
+    class_thresholds = {
+        2: float(args.r2l_threshold),
+        3: float(args.u2r_threshold),
+    }
+    thresholds_applied = not args.no_thresholds
+    y_pred = (
+        apply_prediction_thresholds(y_proba, class_thresholds)
+        if thresholds_applied
+        else raw_y_pred.copy()
+    )
+    changed_predictions = int(np.count_nonzero(y_pred != raw_y_pred))
+    r2l_rejections = int(np.count_nonzero((raw_y_pred == 2) & (y_pred != 2)))
+    u2r_rejections = int(np.count_nonzero((raw_y_pred == 3) & (y_pred != 3)))
+    r2l_gains = int(np.count_nonzero((raw_y_pred != 2) & (y_pred == 2)))
+    u2r_gains = int(np.count_nonzero((raw_y_pred != 3) & (y_pred == 3)))
+
+    raw_report = classification_report(
+        y_test,
+        raw_y_pred,
+        digits=8,
+        target_names=CLASS_NAMES,
+        zero_division=0,
+    )
+    report = classification_report(
+        y_test,
+        y_pred,
+        digits=8,
+        target_names=CLASS_NAMES,
+        zero_division=0,
+    )
+    raw_test_macro_f1 = float(f1_score(y_test, raw_y_pred, average="macro"))
+    raw_per_class_recall = recall_score(
+        y_test,
+        raw_y_pred,
+        labels=np.arange(5),
+        average=None,
+        zero_division=0,
+    )
+    raw_macro_recall = float(np.mean(raw_per_class_recall))
+    raw_mcc = matthews_corrcoef(y_test, raw_y_pred)
+    raw_accuracy = accuracy_score(y_test, raw_y_pred)
     test_macro_f1 = float(f1_score(y_test, y_pred, average="macro"))
+    per_class_recall = recall_score(
+        y_test,
+        y_pred,
+        labels=np.arange(5),
+        average=None,
+        zero_division=0,
+    )
+    macro_recall = float(np.mean(per_class_recall))
     mcc = matthews_corrcoef(y_test, y_pred)
     acc_sklearn = accuracy_score(y_test, y_pred)
 
+    if thresholds_applied:
+        save_confusion_matrices(
+            y_test,
+            raw_y_pred,
+            paths.results_dir,
+            f"{prefix}_raw_argmax",
+        )
     save_confusion_matrices(y_test, y_pred, paths.results_dir, prefix)
     save_multiclass_roc(y_test, y_proba, paths.results_dir, prefix)
 
@@ -651,11 +770,31 @@ def main() -> None:
         f.write(f"use_residual: {not args.no_residual}\n\n")
         f.write(f"Model Parameters: {model_parameters}\n")
         f.write(f"Best Validation Macro F1: {best_val_macro_f1}\n\n")
+        f.write(f"thresholds_applied: {thresholds_applied}\n")
+        f.write(f"r2l_threshold: {args.r2l_threshold}\n")
+        f.write(f"u2r_threshold: {args.u2r_threshold}\n")
+        f.write(f"threshold_changed_predictions: {changed_predictions}\n\n")
+        f.write(f"r2l_rejections: {r2l_rejections}\n")
+        f.write(f"u2r_rejections: {u2r_rejections}\n")
+        f.write(f"r2l_gains_from_rerouting: {r2l_gains}\n")
+        f.write(f"u2r_gains_from_rerouting: {u2r_gains}\n\n")
         f.write(f"Test Loss: {loss}\n")
-        f.write(f"Test Accuracy (keras): {acc}\n")
+        f.write(f"Test Accuracy (keras): {keras_argmax_acc}\n")
+        f.write(f"Raw Argmax Test Accuracy: {raw_accuracy}\n")
+        f.write(f"Raw Argmax Test Macro F1: {raw_test_macro_f1}\n")
+        f.write(f"Raw Argmax Test Macro Recall: {raw_macro_recall}\n")
+        f.write(f"Raw Argmax R2L Recall: {float(raw_per_class_recall[2])}\n")
+        f.write(f"Raw Argmax U2R Recall: {float(raw_per_class_recall[3])}\n")
+        f.write(f"Raw Argmax MCC: {raw_mcc}\n")
         f.write(f"Test Accuracy (sklearn): {acc_sklearn}\n")
         f.write(f"Test Macro F1: {test_macro_f1}\n")
+        f.write(f"Test Macro Recall: {macro_recall}\n")
+        f.write(f"R2L Recall: {float(per_class_recall[2])}\n")
+        f.write(f"U2R Recall: {float(per_class_recall[3])}\n")
         f.write(f"MCC: {mcc}\n\n")
+        f.write("Raw argmax report:\n")
+        f.write(raw_report)
+        f.write("\n\n")
         f.write("Classification report:\n")
         f.write(report)
         f.write("\n")
@@ -667,10 +806,24 @@ def main() -> None:
     print("Synth counts:", synth_counts)
     print("Aug counts:", aug_counts)
     print("Alpha:", alpha)
+    print("Thresholds applied:", thresholds_applied)
+    print("Class thresholds:", class_thresholds)
+    print("Changed predictions:", changed_predictions)
+    print("R2L rejections / gains:", r2l_rejections, "/", r2l_gains)
+    print("U2R rejections / gains:", u2r_rejections, "/", u2r_gains)
     print(f"Test loss: {loss:.6f}")
-    print(f"Test accuracy: {acc:.6f}")
-    print(f"Test macro-F1: {test_macro_f1:.6f}")
-    print(f"MCC: {mcc:.6f}")
+    print(f"Raw argmax accuracy: {raw_accuracy:.6f}")
+    print(f"Raw argmax macro-F1: {raw_test_macro_f1:.6f}")
+    print(f"Raw argmax macro recall: {raw_macro_recall:.6f}")
+    print(f"Raw argmax R2L recall: {raw_per_class_recall[2]:.6f}")
+    print(f"Raw argmax U2R recall: {raw_per_class_recall[3]:.6f}")
+    print(f"Raw argmax MCC: {raw_mcc:.6f}")
+    print(f"Final accuracy: {acc_sklearn:.6f}")
+    print(f"Final macro-F1: {test_macro_f1:.6f}")
+    print(f"Final macro recall: {macro_recall:.6f}")
+    print(f"Final R2L recall: {per_class_recall[2]:.6f}")
+    print(f"Final U2R recall: {per_class_recall[3]:.6f}")
+    print(f"Final MCC: {mcc:.6f}")
     print(f"Model parameters: {model_parameters}")
     print(f"Best validation macro-F1: {best_val_macro_f1:.6f}")
     print(report)

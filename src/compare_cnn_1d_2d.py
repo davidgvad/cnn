@@ -150,6 +150,9 @@ def build_command(
     # Each child process sees exactly one GPU.
     if model_kind == "1d":
         command.extend(["--num-gpus", "1"])
+    else:
+        # Keep the architecture comparison on raw argmax predictions.
+        command.append("--no-thresholds")
     return command
 
 
