@@ -1,13 +1,15 @@
 """
-Conv1D/MLP architecture baselines for cnn_opt with mirrored GPU training.
+Conv1D/MLP/Transformer architecture baselines for cnn_opt with GPU training.
 
 The data preparation, optimized feature order, CTGAN augmentation, focal loss,
 balanced batches, validation metrics, thresholds, and training settings match
 cnn_opt.py. Conv1D reads the ordered features as a (121, 1) sequence. The MLP
-reads the same ordered features as a flat vector and removes convolution.
+reads them as a flat vector. The Transformer treats each scalar feature as one
+token and adds a learned feature-position embedding.
 
 Run:
     python -u src/cnn_opt_1d_4gpu.py --num-gpus 4 --epochs 25
+    python -u src/transformer_baseline.py --num-gpus 4 --epochs 25
 """
 
 from __future__ import annotations
@@ -52,6 +54,148 @@ from cnn_opt import (  # type: ignore
     save_feature_grid,
     save_training_plot,
 )
+
+
+@tf.keras.utils.register_keras_serializable(package="cnn")
+class AddLearnedPositionEmbedding(tf.keras.layers.Layer):
+    """Add one learned identity/position vector to each feature token."""
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        if len(input_shape) != 3:
+            raise ValueError(
+                "Position embeddings expect shape "
+                f"(batch, tokens, dimensions), got {input_shape}."
+            )
+        token_count = input_shape[1]
+        embedding_size = input_shape[2]
+        if token_count is None or embedding_size is None:
+            raise ValueError(
+                "Token count and embedding size must be known when building."
+            )
+        self.position_embeddings = self.add_weight(
+            name="position_embeddings",
+            shape=(1, int(token_count), int(embedding_size)),
+            initializer=tf.keras.initializers.RandomNormal(stddev=0.02),
+            trainable=True,
+        )
+        super().build(input_shape)
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        return inputs + tf.cast(self.position_embeddings, inputs.dtype)
+
+
+def build_vanilla_transformer(
+    loss: tf.keras.losses.Loss,
+    d_model: int = 64,
+    num_heads: int = 4,
+    num_blocks: int = 2,
+    ff_dim: int = 128,
+    dense_units: int = 512,
+    transformer_dropout: float = 0.10,
+    head_dropout: float = 0.30,
+) -> tf.keras.Model:
+    """Build a small vanilla encoder over the 121 ordered feature tokens."""
+    d_model = int(d_model)
+    num_heads = int(num_heads)
+    num_blocks = int(num_blocks)
+    ff_dim = int(ff_dim)
+    dense_units = int(dense_units)
+    if d_model <= 0:
+        raise ValueError("--d-model must be greater than zero.")
+    if num_heads <= 0:
+        raise ValueError("--num-heads must be greater than zero.")
+    if d_model % num_heads != 0:
+        raise ValueError(
+            f"--num-heads must divide --d-model. "
+            f"Got num_heads={num_heads}, d_model={d_model}."
+        )
+    if num_blocks <= 0:
+        raise ValueError("--transformer-blocks must be greater than zero.")
+    if ff_dim <= 0:
+        raise ValueError("--ff-dim must be greater than zero.")
+    if dense_units <= 0:
+        raise ValueError("--dense-units must be greater than zero.")
+    if not 0.0 <= transformer_dropout < 1.0:
+        raise ValueError("--transformer-dropout must be in [0, 1).")
+    if not 0.0 <= head_dropout < 1.0:
+        raise ValueError("--dropout2 must be in [0, 1).")
+
+    inputs = tf.keras.Input(shape=(121, 1))
+    x = tf.keras.layers.Dense(d_model, name="scalar_projection")(inputs)
+    x = AddLearnedPositionEmbedding(name="feature_position_embedding")(x)
+    x = tf.keras.layers.Dropout(
+        transformer_dropout,
+        name="embedding_dropout",
+    )(x)
+
+    for block_index in range(num_blocks):
+        block_name = f"encoder_{block_index + 1}"
+        attention = tf.keras.layers.MultiHeadAttention(
+            num_heads=num_heads,
+            key_dim=d_model // num_heads,
+            dropout=transformer_dropout,
+            name=f"{block_name}_attention",
+        )(x, x)
+        attention = tf.keras.layers.Dropout(
+            transformer_dropout,
+            name=f"{block_name}_attention_dropout",
+        )(attention)
+        x = tf.keras.layers.Add(name=f"{block_name}_attention_residual")(
+            [x, attention]
+        )
+        x = tf.keras.layers.LayerNormalization(
+            epsilon=1e-6,
+            name=f"{block_name}_attention_norm",
+        )(x)
+
+        feed_forward = tf.keras.layers.Dense(
+            ff_dim,
+            activation="relu",
+            name=f"{block_name}_ffn_expand",
+        )(x)
+        feed_forward = tf.keras.layers.Dropout(
+            transformer_dropout,
+            name=f"{block_name}_ffn_dropout_1",
+        )(feed_forward)
+        feed_forward = tf.keras.layers.Dense(
+            d_model,
+            name=f"{block_name}_ffn_project",
+        )(feed_forward)
+        feed_forward = tf.keras.layers.Dropout(
+            transformer_dropout,
+            name=f"{block_name}_ffn_dropout_2",
+        )(feed_forward)
+        x = tf.keras.layers.Add(name=f"{block_name}_ffn_residual")(
+            [x, feed_forward]
+        )
+        x = tf.keras.layers.LayerNormalization(
+            epsilon=1e-6,
+            name=f"{block_name}_ffn_norm",
+        )(x)
+
+    x = tf.keras.layers.GlobalAveragePooling1D(name="token_average")(x)
+    x = tf.keras.layers.Dense(
+        dense_units,
+        activation="relu",
+        name="classifier_hidden",
+    )(x)
+    x = tf.keras.layers.Dropout(
+        head_dropout,
+        name="classifier_dropout",
+    )(x)
+    outputs = tf.keras.layers.Dense(
+        5,
+        activation="softmax",
+        name="class_probabilities",
+    )(x)
+
+    model = tf.keras.Model(
+        inputs=inputs,
+        outputs=outputs,
+        name="vanilla_feature_transformer",
+    )
+    model.compile(optimizer="adam", loss=loss, metrics=["accuracy"])
+    return model
 
 
 def build_opt_cnn_1d(
@@ -186,17 +330,24 @@ def create_gpu_strategy(num_gpus: int, global_batch_size: int) -> tf.distribute.
     return strategy
 
 
-def main() -> None:
+def main(
+    default_architecture: str = "conv1d",
+    default_run_name: str = "opt1d_4gpu",
+    default_no_thresholds: bool = False,
+) -> None:
     parser = argparse.ArgumentParser(
-        description="NSL-KDD Conv1D/MLP baselines using the cnn_opt training pipeline."
+        description=(
+            "NSL-KDD neural architecture baselines using the cnn_opt "
+            "training pipeline."
+        )
     )
 
-    parser.add_argument("--run-name", type=str, default="opt1d_4gpu")
+    parser.add_argument("--run-name", type=str, default=default_run_name)
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument(
         "--architecture",
-        choices=["conv1d", "mlp"],
-        default="conv1d",
+        choices=["conv1d", "mlp", "transformer"],
+        default=default_architecture,
         help="Change only the neural backbone; the training pipeline stays the same.",
     )
 
@@ -232,11 +383,23 @@ def main() -> None:
     )
     parser.add_argument("--groups", type=int, default=1)
     parser.add_argument("--base-filters", type=int, default=64)
-    parser.add_argument("--dense-units", type=int, default=256)
+    parser.add_argument(
+        "--dense-units",
+        type=int,
+        default=None,
+        help="Classifier width. Defaults to 512 for Transformer, otherwise 256.",
+    )
     parser.add_argument("--dropout1", type=float, default=0.25)
     parser.add_argument("--dropout2", type=float, default=0.30)
     parser.add_argument("--no-bn", action="store_true")
     parser.add_argument("--no-residual", action="store_true")
+
+    # Vanilla Transformer settings.
+    parser.add_argument("--d-model", type=int, default=64)
+    parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--transformer-blocks", type=int, default=2)
+    parser.add_argument("--ff-dim", type=int, default=128)
+    parser.add_argument("--transformer-dropout", type=float, default=0.10)
 
     # Same post-training decision policy as cnn_opt.
     parser.add_argument("--r2l-threshold", type=float, default=0.55)
@@ -244,18 +407,36 @@ def main() -> None:
     parser.add_argument(
         "--no-thresholds",
         action="store_true",
+        default=default_no_thresholds,
         help="Use ordinary argmax predictions instead of rare-class rejection thresholds.",
     )
     args = parser.parse_args()
+    if args.dense_units is None:
+        args.dense_units = 512 if args.architecture == "transformer" else 256
 
     if args.num_gpus <= 0:
         parser.error("--num-gpus must be greater than 0.")
     if args.minority_per_batch < 0:
         parser.error("--minority-per-batch must be 0 or greater.")
+    if args.dense_units <= 0:
+        parser.error("--dense-units must be greater than zero.")
+    if not 0.0 <= args.dropout2 < 1.0:
+        parser.error("--dropout2 must be in [0, 1).")
     if not 0.0 <= args.r2l_threshold <= 1.0:
         parser.error("--r2l-threshold must be between 0 and 1.")
     if not 0.0 <= args.u2r_threshold <= 1.0:
         parser.error("--u2r-threshold must be between 0 and 1.")
+    if args.architecture == "transformer":
+        if args.d_model <= 0:
+            parser.error("--d-model must be greater than zero.")
+        if args.num_heads <= 0 or args.d_model % args.num_heads != 0:
+            parser.error("--num-heads must be positive and divide --d-model.")
+        if args.transformer_blocks <= 0:
+            parser.error("--transformer-blocks must be greater than zero.")
+        if args.ff_dim <= 0:
+            parser.error("--ff-dim must be greater than zero.")
+        if not 0.0 <= args.transformer_dropout < 1.0:
+            parser.error("--transformer-dropout must be in [0, 1).")
 
     tf.keras.utils.set_random_seed(args.seed)
     np.random.seed(args.seed)
@@ -371,14 +552,14 @@ def main() -> None:
     train_proc = train_proc[ordered_columns]
     test_proc = test_proc[ordered_columns]
 
-    prefix = args.run_name.strip() or "opt1d_4gpu"
+    prefix = args.run_name.strip() or default_run_name
     grid_path = paths.results_dir / f"{prefix}_feature_order.tsv"
     save_feature_grid(ordered_features, grid_path)
 
     X_all_2d, y_all, X_test_2d, y_test = prepare_xy_from_processed(
         train_proc, test_proc
     )
-    if args.architecture == "conv1d":
+    if args.architecture in {"conv1d", "transformer"}:
         X_all = X_all_2d.reshape(-1, 121, 1)
         X_test = X_test_2d.reshape(-1, 121, 1)
     else:
@@ -413,13 +594,24 @@ def main() -> None:
                 use_batch_norm=not args.no_bn,
                 use_residual=not args.no_residual,
             )
-        else:
+        elif args.architecture == "mlp":
             model = build_opt_mlp(
                 loss=loss,
                 dense_units=args.dense_units,
                 dropout1=args.dropout1,
                 dropout2=args.dropout2,
                 use_batch_norm=not args.no_bn,
+            )
+        else:
+            model = build_vanilla_transformer(
+                loss=loss,
+                d_model=args.d_model,
+                num_heads=args.num_heads,
+                num_blocks=args.transformer_blocks,
+                ff_dim=args.ff_dim,
+                dense_units=args.dense_units,
+                transformer_dropout=args.transformer_dropout,
+                head_dropout=args.dropout2,
             )
     model_parameters = int(model.count_params())
 
@@ -561,6 +753,12 @@ def main() -> None:
         else np.zeros(5, dtype=np.int64)
     )
     augmented_counts = np.bincount(y_all, minlength=5)
+    if args.architecture == "conv1d":
+        residual_setting: bool | str = not args.no_residual
+    elif args.architecture == "transformer":
+        residual_setting = True
+    else:
+        residual_setting = "not applicable"
 
     result_path = paths.results_dir / f"{prefix}_results.txt"
     with result_path.open("w", encoding="utf-8") as output_file:
@@ -600,12 +798,37 @@ def main() -> None:
             f"{args.base_filters if args.architecture == 'conv1d' else 'not applicable'}\n"
         )
         output_file.write(f"dense_units: {args.dense_units}\n")
-        output_file.write(f"dropout1: {args.dropout1}\n")
-        output_file.write(f"dropout2: {args.dropout2}\n")
-        output_file.write(f"use_batch_norm: {not args.no_bn}\n")
         output_file.write(
-            "use_residual: "
-            f"{not args.no_residual if args.architecture == 'conv1d' else 'not applicable'}\n"
+            "dropout1: "
+            f"{args.dropout1 if args.architecture != 'transformer' else 'not applicable'}\n"
+        )
+        output_file.write(f"dropout2: {args.dropout2}\n")
+        output_file.write(
+            "use_batch_norm: "
+            f"{not args.no_bn if args.architecture != 'transformer' else 'not applicable'}\n"
+        )
+        output_file.write(
+            f"use_residual: {residual_setting}\n"
+        )
+        output_file.write(
+            "d_model: "
+            f"{args.d_model if args.architecture == 'transformer' else 'not applicable'}\n"
+        )
+        output_file.write(
+            "num_heads: "
+            f"{args.num_heads if args.architecture == 'transformer' else 'not applicable'}\n"
+        )
+        output_file.write(
+            "transformer_blocks: "
+            f"{args.transformer_blocks if args.architecture == 'transformer' else 'not applicable'}\n"
+        )
+        output_file.write(
+            "ff_dim: "
+            f"{args.ff_dim if args.architecture == 'transformer' else 'not applicable'}\n"
+        )
+        output_file.write(
+            "transformer_dropout: "
+            f"{args.transformer_dropout if args.architecture == 'transformer' else 'not applicable'}\n"
         )
         output_file.write(f"Model Parameters: {model_parameters}\n")
         output_file.write(
