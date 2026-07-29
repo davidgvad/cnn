@@ -161,6 +161,7 @@ def main() -> None:
                 str(dropout2),
                 "--minority-per-batch",
                 str(minority),
+                "--no-thresholds",
             ]
             commands.append((run_name, command))
             plan_rows.append(

@@ -1,8 +1,7 @@
 """
-Cost-sensitive XGBoost baseline for the NSL-KDD five-class task.
+Standard or cost-sensitive XGBoost baseline for NSL-KDD five-class.
 
-The model trains on the real KDDTrain+ records.  Each training row receives a
-balanced class weight:
+Cost-sensitive mode gives each training row a balanced class weight:
 
     weight(class c) = number_of_training_rows / (5 * rows_in_class_c)
 
@@ -147,6 +146,12 @@ def main() -> None:
     parser.add_argument("--run-name", default="cost_sensitive_xgboost")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--val-split", type=float, default=0.20)
+    parser.add_argument(
+        "--class-weighting",
+        choices=["none", "balanced"],
+        default="balanced",
+        help="none is standard XGBoost; balanced is cost-sensitive XGBoost.",
+    )
     parser.add_argument("--n-estimators", type=int, default=1000)
     parser.add_argument("--early-stopping-rounds", type=int, default=50)
     parser.add_argument("--max-depth", type=int, default=6)
@@ -201,9 +206,12 @@ def main() -> None:
         stratify=y_all,
     )
 
-    class_weights = balanced_class_weights(y_train)
-    train_sample_weights = class_weights[y_train]
-    val_sample_weights = class_weights[y_val]
+    if args.class_weighting == "balanced":
+        class_weights = balanced_class_weights(y_train)
+        train_sample_weights = class_weights[y_train]
+    else:
+        class_weights = None
+        train_sample_weights = None
 
     model_args = {
         "objective": "multi:softprob",
@@ -226,14 +234,13 @@ def main() -> None:
         model_args["early_stopping_rounds"] = args.early_stopping_rounds
 
     model = XGBClassifier(**model_args)
-    model.fit(
-        X_train,
-        y_train,
-        sample_weight=train_sample_weights,
-        eval_set=[(X_val, y_val)],
-        sample_weight_eval_set=[val_sample_weights],
-        verbose=args.verbose_eval if args.verbose_eval > 0 else False,
-    )
+    fit_args = {
+        "eval_set": [(X_val, y_val)],
+        "verbose": args.verbose_eval if args.verbose_eval > 0 else False,
+    }
+    if train_sample_weights is not None:
+        fit_args["sample_weight"] = train_sample_weights
+    model.fit(X_train, y_train, **fit_args)
 
     y_proba = model.predict_proba(X_test)
     y_pred = model.predict(X_test).astype(np.int64)
@@ -260,10 +267,23 @@ def main() -> None:
     test_counts = np.bincount(y_test, minlength=5)
     best_iteration = getattr(model, "best_iteration", None)
 
+    model_label = (
+        "xgboost_cost_sensitive"
+        if args.class_weighting == "balanced"
+        else "xgboost_standard"
+    )
     with results_path.open("w", encoding="utf-8") as f:
-        f.write("Cost-sensitive XGBoost (balanced per-class sample weights)\n\n")
+        if args.class_weighting == "balanced":
+            f.write(
+                "Cost-sensitive XGBoost "
+                "(balanced per-class sample weights)\n\n"
+            )
+        else:
+            f.write("Standard XGBoost (no class/sample weights)\n\n")
         f.write(f"run_name: {prefix}\n")
         f.write(f"seed: {args.seed}\n")
+        f.write(f"class_weighting: {args.class_weighting}\n")
+        f.write("validation_weighting: none\n")
         f.write("train_data: real KDDTrain+ only\n")
         f.write("test_data: KDDTest+\n")
         f.write("decision_policy: argmax\n")
@@ -274,7 +294,10 @@ def main() -> None:
         f.write(f"train_counts: {train_counts.tolist()}\n")
         f.write(f"validation_counts: {val_counts.tolist()}\n")
         f.write(f"test_counts: {test_counts.tolist()}\n")
-        f.write(f"class_weights: {class_weights.tolist()}\n\n")
+        f.write(
+            "class_weights: "
+            f"{class_weights.tolist() if class_weights is not None else 'not used'}\n\n"
+        )
         f.write(f"n_estimators: {args.n_estimators}\n")
         f.write(f"early_stopping_rounds: {args.early_stopping_rounds}\n")
         f.write(f"best_iteration: {best_iteration}\n")
@@ -314,7 +337,7 @@ def main() -> None:
         writer.writeheader()
         writer.writerow(
             {
-                "model": "cost_sensitive_xgboost",
+                "model": model_label,
                 "seed": args.seed,
                 "train_data": "real KDDTrain+",
                 "decision_policy": "argmax",
@@ -322,10 +345,12 @@ def main() -> None:
             }
         )
 
-    print("\n=== Cost-sensitive XGBoost: KDDTest+ ===")
+    print(f"\n=== {model_label}: KDDTest+ ===")
     print("Class order:", CLASS_NAMES)
     print("Training class counts:", train_counts)
-    print("Per-class weights:", class_weights)
+    print("Class weighting:", args.class_weighting)
+    if class_weights is not None:
+        print("Per-class weights:", class_weights)
     print(f"Accuracy:     {metrics['accuracy']:.6f}")
     print(f"MCC:          {metrics['mcc']:.6f}")
     print(f"Macro-F1:     {metrics['macro_f1']:.6f}")

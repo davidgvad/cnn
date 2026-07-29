@@ -1,9 +1,10 @@
 """
-1D version of cnn_opt with mirrored training across four GPUs.
+Conv1D/MLP architecture baselines for cnn_opt with mirrored GPU training.
 
 The data preparation, optimized feature order, CTGAN augmentation, focal loss,
-balanced batches, validation metrics, and training settings match cnn_opt.py.
-The model reads the 121 ordered features as a (121, 1) sequence and uses Conv1D.
+balanced batches, validation metrics, thresholds, and training settings match
+cnn_opt.py. Conv1D reads the ordered features as a (121, 1) sequence. The MLP
+reads the same ordered features as a flat vector and removes convolution.
 
 Run:
     python -u src/cnn_opt_1d_4gpu.py --num-gpus 4 --epochs 25
@@ -12,12 +13,18 @@ Run:
 from __future__ import annotations
 
 import argparse
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.metrics import accuracy_score, classification_report, f1_score, matthews_corrcoef
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    f1_score,
+    matthews_corrcoef,
+    recall_score,
+)
 from sklearn.model_selection import train_test_split
 
 from cnn_gan_foc import (  # type: ignore
@@ -40,6 +47,7 @@ from cnn_gan_foc import (  # type: ignore
 from cnn_opt import (  # type: ignore
     BalancedBatchSequence,
     ValF1Callback,
+    apply_prediction_thresholds,
     build_optimized_feature_order,
     save_feature_grid,
     save_training_plot,
@@ -115,6 +123,41 @@ def build_opt_cnn_1d(
     return model
 
 
+def build_opt_mlp(
+    loss: tf.keras.losses.Loss,
+    dense_units: int = 256,
+    dropout1: float = 0.25,
+    dropout2: float = 0.30,
+    use_batch_norm: bool = True,
+) -> tf.keras.Model:
+    """Two-hidden-layer MLP using the same 121 ordered input features."""
+    dense_units = int(dense_units)
+    inputs = tf.keras.Input(shape=(121,))
+
+    x = tf.keras.layers.Dense(
+        dense_units,
+        use_bias=not use_batch_norm,
+    )(inputs)
+    if use_batch_norm:
+        x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Activation("relu")(x)
+    x = tf.keras.layers.Dropout(dropout1)(x)
+
+    x = tf.keras.layers.Dense(
+        dense_units,
+        use_bias=not use_batch_norm,
+    )(x)
+    if use_batch_norm:
+        x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Activation("relu")(x)
+    x = tf.keras.layers.Dropout(dropout2)(x)
+    outputs = tf.keras.layers.Dense(5, activation="softmax")(x)
+
+    model = tf.keras.Model(inputs=inputs, outputs=outputs, name="mlp_opt")
+    model.compile(optimizer="adam", loss=loss, metrics=["accuracy"])
+    return model
+
+
 def create_gpu_strategy(num_gpus: int, global_batch_size: int) -> tf.distribute.Strategy:
     """Create one complete model replica on each requested GPU."""
     available_gpus = tf.config.list_physical_devices("GPU")
@@ -129,6 +172,11 @@ def create_gpu_strategy(num_gpus: int, global_batch_size: int) -> tf.distribute.
             f"--num-gpus ({num_gpus})."
         )
 
+    if num_gpus == 1:
+        print("Using TensorFlow's default strategy with one visible GPU.")
+        print(f"Global batch size: {global_batch_size}")
+        return tf.distribute.get_strategy()
+
     devices = [f"/GPU:{index}" for index in range(num_gpus)]
     strategy = tf.distribute.MirroredStrategy(devices=devices)
     print(f"Using devices: {devices}")
@@ -140,11 +188,17 @@ def create_gpu_strategy(num_gpus: int, global_batch_size: int) -> tf.distribute.
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="NSL-KDD cnn_opt with Conv1D and mirrored multi-GPU training."
+        description="NSL-KDD Conv1D/MLP baselines using the cnn_opt training pipeline."
     )
 
     parser.add_argument("--run-name", type=str, default="opt1d_4gpu")
     parser.add_argument("--num-gpus", type=int, default=4)
+    parser.add_argument(
+        "--architecture",
+        choices=["conv1d", "mlp"],
+        default="conv1d",
+        help="Change only the neural backbone; the training pipeline stays the same.",
+    )
 
     # Same training defaults as cnn_opt.
     parser.add_argument("--epochs", type=int, default=25)
@@ -183,12 +237,25 @@ def main() -> None:
     parser.add_argument("--dropout2", type=float, default=0.30)
     parser.add_argument("--no-bn", action="store_true")
     parser.add_argument("--no-residual", action="store_true")
+
+    # Same post-training decision policy as cnn_opt.
+    parser.add_argument("--r2l-threshold", type=float, default=0.55)
+    parser.add_argument("--u2r-threshold", type=float, default=0.40)
+    parser.add_argument(
+        "--no-thresholds",
+        action="store_true",
+        help="Use ordinary argmax predictions instead of rare-class rejection thresholds.",
+    )
     args = parser.parse_args()
 
     if args.num_gpus <= 0:
         parser.error("--num-gpus must be greater than 0.")
     if args.minority_per_batch < 0:
         parser.error("--minority-per-batch must be 0 or greater.")
+    if not 0.0 <= args.r2l_threshold <= 1.0:
+        parser.error("--r2l-threshold must be between 0 and 1.")
+    if not 0.0 <= args.u2r_threshold <= 1.0:
+        parser.error("--u2r-threshold must be between 0 and 1.")
 
     tf.keras.utils.set_random_seed(args.seed)
     np.random.seed(args.seed)
@@ -311,8 +378,12 @@ def main() -> None:
     X_all_2d, y_all, X_test_2d, y_test = prepare_xy_from_processed(
         train_proc, test_proc
     )
-    X_all = X_all_2d.reshape(-1, 121, 1)
-    X_test = X_test_2d.reshape(-1, 121, 1)
+    if args.architecture == "conv1d":
+        X_all = X_all_2d.reshape(-1, 121, 1)
+        X_test = X_test_2d.reshape(-1, 121, 1)
+    else:
+        X_all = X_all_2d.reshape(-1, 121)
+        X_test = X_test_2d.reshape(-1, 121)
 
     X_train, X_val, y_train, y_val = train_test_split(
         X_all,
@@ -331,16 +402,25 @@ def main() -> None:
         loss = ClassBalancedFocalLoss(
             alpha=alpha, gamma=args.focal_gamma
         )
-        model = build_opt_cnn_1d(
-            loss=loss,
-            groups=args.groups,
-            base_filters=args.base_filters,
-            dense_units=args.dense_units,
-            dropout1=args.dropout1,
-            dropout2=args.dropout2,
-            use_batch_norm=not args.no_bn,
-            use_residual=not args.no_residual,
-        )
+        if args.architecture == "conv1d":
+            model = build_opt_cnn_1d(
+                loss=loss,
+                groups=args.groups,
+                base_filters=args.base_filters,
+                dense_units=args.dense_units,
+                dropout1=args.dropout1,
+                dropout2=args.dropout2,
+                use_batch_norm=not args.no_bn,
+                use_residual=not args.no_residual,
+            )
+        else:
+            model = build_opt_mlp(
+                loss=loss,
+                dense_units=args.dense_units,
+                dropout1=args.dropout1,
+                dropout2=args.dropout2,
+                use_batch_norm=not args.no_bn,
+            )
     model_parameters = int(model.count_params())
 
     weights_path = paths.model_dir / f"{prefix}_best.weights.h5"
@@ -396,17 +476,73 @@ def main() -> None:
     model.save(model_path)
 
     best_val_macro_f1 = max(history.history.get("val_macro_f1", [0.0]))
-    test_loss, test_accuracy = model.evaluate(X_test, y_test, verbose=0)
+    test_loss, keras_argmax_accuracy = model.evaluate(X_test, y_test, verbose=0)
     probabilities = model.predict(X_test, verbose=0)
-    predictions = np.argmax(probabilities, axis=1)
+    raw_predictions = np.argmax(probabilities, axis=1)
 
-    report = classification_report(
-        y_test, predictions, digits=8, target_names=CLASS_NAMES
+    class_thresholds: Dict[int, float] = {
+        2: float(args.r2l_threshold),
+        3: float(args.u2r_threshold),
+    }
+    thresholds_applied = not args.no_thresholds
+    predictions = (
+        apply_prediction_thresholds(probabilities, class_thresholds)
+        if thresholds_applied
+        else raw_predictions.copy()
     )
-    test_macro_f1 = float(f1_score(y_test, predictions, average="macro"))
-    mcc = matthews_corrcoef(y_test, predictions)
-    sklearn_accuracy = accuracy_score(y_test, predictions)
+    changed_predictions = int(
+        np.count_nonzero(predictions != raw_predictions)
+    )
 
+    raw_report = classification_report(
+        y_test,
+        raw_predictions,
+        digits=8,
+        target_names=CLASS_NAMES,
+        zero_division=0,
+    )
+    report = classification_report(
+        y_test,
+        predictions,
+        digits=8,
+        target_names=CLASS_NAMES,
+        zero_division=0,
+    )
+    raw_per_class_recall = recall_score(
+        y_test,
+        raw_predictions,
+        labels=np.arange(5),
+        average=None,
+        zero_division=0,
+    )
+    raw_accuracy = float(accuracy_score(y_test, raw_predictions))
+    raw_macro_f1 = float(
+        f1_score(y_test, raw_predictions, average="macro", zero_division=0)
+    )
+    raw_macro_recall = float(np.mean(raw_per_class_recall))
+    raw_mcc = float(matthews_corrcoef(y_test, raw_predictions))
+
+    per_class_recall = recall_score(
+        y_test,
+        predictions,
+        labels=np.arange(5),
+        average=None,
+        zero_division=0,
+    )
+    sklearn_accuracy = float(accuracy_score(y_test, predictions))
+    test_macro_f1 = float(
+        f1_score(y_test, predictions, average="macro", zero_division=0)
+    )
+    macro_recall = float(np.mean(per_class_recall))
+    mcc = float(matthews_corrcoef(y_test, predictions))
+
+    if thresholds_applied:
+        save_confusion_matrices(
+            y_test,
+            raw_predictions,
+            paths.results_dir,
+            f"{prefix}_raw_argmax",
+        )
     save_confusion_matrices(
         y_test, predictions, paths.results_dir, prefix
     )
@@ -428,8 +564,11 @@ def main() -> None:
 
     result_path = paths.results_dir / f"{prefix}_results.txt"
     with result_path.open("w", encoding="utf-8") as output_file:
-        output_file.write("CNN_OPT 1D with mirrored multi-GPU training\n\n")
+        output_file.write(
+            f"CNN_OPT {args.architecture.upper()} architecture baseline\n\n"
+        )
         output_file.write(f"run_name: {prefix}\n")
+        output_file.write(f"architecture: {args.architecture}\n")
         output_file.write(f"seed: {args.seed}\n")
         output_file.write(f"epochs: {args.epochs}\n")
         output_file.write(f"val_split: {args.val_split}\n")
@@ -453,33 +592,84 @@ def main() -> None:
         output_file.write(
             f"alpha_counts: {alpha_counts.tolist()}\n"
         )
-        output_file.write(f"groups: {args.groups}\n")
-        output_file.write(f"base_filters: {args.base_filters}\n")
+        output_file.write(
+            f"groups: {args.groups if args.architecture == 'conv1d' else 'not applicable'}\n"
+        )
+        output_file.write(
+            "base_filters: "
+            f"{args.base_filters if args.architecture == 'conv1d' else 'not applicable'}\n"
+        )
         output_file.write(f"dense_units: {args.dense_units}\n")
         output_file.write(f"dropout1: {args.dropout1}\n")
         output_file.write(f"dropout2: {args.dropout2}\n")
         output_file.write(f"use_batch_norm: {not args.no_bn}\n")
-        output_file.write(f"use_residual: {not args.no_residual}\n")
+        output_file.write(
+            "use_residual: "
+            f"{not args.no_residual if args.architecture == 'conv1d' else 'not applicable'}\n"
+        )
         output_file.write(f"Model Parameters: {model_parameters}\n")
         output_file.write(
             f"Best Validation Macro F1: {best_val_macro_f1}\n\n"
         )
+        output_file.write(f"thresholds_applied: {thresholds_applied}\n")
+        output_file.write(f"r2l_threshold: {args.r2l_threshold}\n")
+        output_file.write(f"u2r_threshold: {args.u2r_threshold}\n")
+        output_file.write(
+            f"threshold_changed_predictions: {changed_predictions}\n\n"
+        )
         output_file.write(f"Test Loss: {test_loss}\n")
-        output_file.write(f"Test Accuracy (keras): {test_accuracy}\n")
+        output_file.write(
+            f"Test Accuracy (keras): {keras_argmax_accuracy}\n"
+        )
+        output_file.write(f"Raw Argmax Test Accuracy: {raw_accuracy}\n")
+        output_file.write(f"Raw Argmax Test Macro F1: {raw_macro_f1}\n")
+        output_file.write(
+            f"Raw Argmax Test Macro Recall: {raw_macro_recall}\n"
+        )
+        output_file.write(
+            f"Raw Argmax R2L Recall: {float(raw_per_class_recall[2])}\n"
+        )
+        output_file.write(
+            f"Raw Argmax U2R Recall: {float(raw_per_class_recall[3])}\n"
+        )
+        output_file.write(f"Raw Argmax MCC: {raw_mcc}\n")
         output_file.write(
             f"Test Accuracy (sklearn): {sklearn_accuracy}\n"
         )
         output_file.write(f"Test Macro F1: {test_macro_f1}\n")
+        output_file.write(f"Test Macro Recall: {macro_recall}\n")
+        output_file.write(
+            f"R2L Recall: {float(per_class_recall[2])}\n"
+        )
+        output_file.write(
+            f"U2R Recall: {float(per_class_recall[3])}\n"
+        )
         output_file.write(f"MCC: {mcc}\n\n")
+        output_file.write("Raw argmax report:\n")
+        output_file.write(raw_report)
+        output_file.write("\n\n")
         output_file.write("Classification report:\n")
         output_file.write(report)
         output_file.write("\n")
 
-    print("\n=== CNN_OPT 1D Multi-GPU Test Results ===")
+    print(
+        f"\n=== CNN_OPT {args.architecture.upper()} Test Results ==="
+    )
+    print("Thresholds applied:", thresholds_applied)
+    print("Changed predictions:", changed_predictions)
     print(f"Test loss: {test_loss:.6f}")
-    print(f"Test accuracy: {test_accuracy:.6f}")
-    print(f"Test macro-F1: {test_macro_f1:.6f}")
-    print(f"MCC: {mcc:.6f}")
+    print(f"Raw argmax accuracy: {raw_accuracy:.6f}")
+    print(f"Raw argmax macro-F1: {raw_macro_f1:.6f}")
+    print(f"Raw argmax macro recall: {raw_macro_recall:.6f}")
+    print(f"Raw argmax R2L recall: {raw_per_class_recall[2]:.6f}")
+    print(f"Raw argmax U2R recall: {raw_per_class_recall[3]:.6f}")
+    print(f"Raw argmax MCC: {raw_mcc:.6f}")
+    print(f"Final accuracy: {sklearn_accuracy:.6f}")
+    print(f"Final macro-F1: {test_macro_f1:.6f}")
+    print(f"Final macro recall: {macro_recall:.6f}")
+    print(f"Final R2L recall: {per_class_recall[2]:.6f}")
+    print(f"Final U2R recall: {per_class_recall[3]:.6f}")
+    print(f"Final MCC: {mcc:.6f}")
     print(f"Model parameters: {model_parameters}")
     print(f"Best validation macro-F1: {best_val_macro_f1:.6f}")
     print(report)
