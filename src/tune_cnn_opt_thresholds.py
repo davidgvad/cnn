@@ -2,8 +2,9 @@
 Tune R2L/U2R decision thresholds for an already-trained cnn_opt Conv2D model.
 
 Thresholds are selected only on the reconstructed real-record subset of the
-model's validation split. The objective is the mean R2L/U2R recall. KDDTest+
-is predicted only after the pair is fixed.
+model's validation split. The objective first maximizes the weaker of the R2L
+and U2R recalls, then minimizes the gap between them. KDDTest+ is predicted
+only after the pair is fixed.
 
 Decision rule:
     adjusted_score[R2L] = probability[R2L] / r2l_threshold
@@ -310,6 +311,9 @@ def calculate_metrics(
         "minimum_minority_recall": float(
             np.min(per_class_recall[[2, 3]])
         ),
+        "minority_recall_gap": float(
+            abs(per_class_recall[2] - per_class_recall[3])
+        ),
         "r2l_f1": float(per_class_f1[2]),
         "u2r_f1": float(per_class_f1[3]),
         "rare_f1": float(np.mean(per_class_f1[[2, 3]])),
@@ -373,8 +377,9 @@ def search_thresholds(
         raise ValueError("Threshold search produced no candidates.")
     search_frame = pd.DataFrame(rows).sort_values(
         by=[
-            "minority_recall",
             "minimum_minority_recall",
+            "minority_recall_gap",
+            "minority_recall",
             "rare_f1",
             "macro_f1",
             "mcc",
@@ -386,6 +391,7 @@ def search_thresholds(
         ],
         ascending=[
             False,
+            True,
             False,
             False,
             False,
@@ -423,8 +429,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description=(
-            "Tune cnn_opt thresholds for highest mean R2L/U2R "
-            "validation recall."
+            "Tune cnn_opt thresholds for balanced R2L/U2R validation recall."
         )
     )
     model_group = parser.add_mutually_exclusive_group(required=True)
@@ -571,7 +576,7 @@ def main() -> None:
     )
     print(
         f"Searching {len(candidates) ** 2} threshold pairs "
-        "using mean validation R2L/U2R recall..."
+        "using balanced validation R2L/U2R recall..."
     )
     best, search_frame = search_thresholds(
         y_val,
@@ -713,7 +718,8 @@ def main() -> None:
             "the split was recreated from the saved seed and current data\n"
         )
         output_file.write(
-            "selection_objective: mean validation R2L/U2R recall\n"
+            "selection_objective: maximize the lower of R2L/U2R validation "
+            "recall, then minimize the recall gap, then maximize their mean\n"
         )
         output_file.write(
             "threshold_rule: divide R2L/U2R scores by their thresholds\n"
@@ -761,6 +767,11 @@ def main() -> None:
     print("\n=== Selected decision thresholds ===")
     print(f"R2L threshold: {r2l_threshold:.4f}")
     print(f"U2R threshold: {u2r_threshold:.4f}")
+    print(
+        "Validation weaker-minority recall: "
+        f"raw={raw_val_metrics['minimum_minority_recall']:.4f}, "
+        f"tuned={tuned_val_metrics['minimum_minority_recall']:.4f}"
+    )
     print(
         "Validation minority recall mean: "
         f"raw={raw_val_metrics['minority_recall']:.4f}, "
