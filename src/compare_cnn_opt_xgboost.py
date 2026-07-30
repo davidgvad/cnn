@@ -70,9 +70,14 @@ def main() -> None:
         help="Cached CTGAN CSV used by cnn_opt.",
     )
     parser.add_argument(
+        "--cnn-no-score-scaling",
         "--cnn-no-thresholds",
+        dest="cnn_no_thresholds",
         action="store_true",
-        help="Compare raw CNN argmax predictions instead of its default thresholds.",
+        help=(
+            "Compare raw CNN argmax predictions instead of its default "
+            "class-specific score scaling."
+        ),
     )
     parser.add_argument(
         "--xgb-device",
@@ -146,7 +151,7 @@ def main() -> None:
     print(
         "CNN: complete cnn_opt pipeline "
         "(CTGAN + focal loss + minority batches + "
-        f"{'argmax' if args.cnn_no_thresholds else 'fixed thresholds'})."
+        f"{'argmax' if args.cnn_no_thresholds else 'score scaling'})."
     )
     print("XGBoost: real KDDTrain+ with balanced per-class sample weights.")
     print("Both are evaluated on the same untouched KDDTest+.")
@@ -179,7 +184,7 @@ def main() -> None:
             "decision_policy": (
                 "argmax"
                 if args.cnn_no_thresholds
-                else "R2L=0.55/U2R=0.40 rejection thresholds"
+                else "validation-tuned R2L/U2R score scaling"
             ),
             "test_data": "KDDTest+",
             **cnn_metrics,

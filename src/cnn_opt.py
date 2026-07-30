@@ -17,9 +17,9 @@ What stays ON by default
     focal_gamma = 1.5
 - Each training batch includes R2L and U2R by default
 - groups configurable (groups=1 => standard conv; groups>1 => grouped conv)
-- Fixed post-training rejection thresholds:
-    R2L = 0.55
-    U2R = 0.40
+- Validation-tuned class-specific score scaling:
+    search R2L/U2R coefficients on real validation records
+    freeze the selected pair before evaluating KDDTest+
 
 Recommended workflow
 --------------------
@@ -42,6 +42,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from sklearn.metrics import (
     accuracy_score,
@@ -193,17 +194,49 @@ class ValF1Callback(tf.keras.callbacks.Callback):
         print(f" — val_macro_f1: {macro_f1:.4f} — val_rare_f1: {rare_f1:.4f}", flush=True)
 
 
+def apply_class_score_scaling(
+    y_proba: np.ndarray,
+    class_coefficients: Dict[int, float],
+) -> np.ndarray:
+    """
+    Divide selected class scores by positive coefficients, then take argmax.
+
+    A coefficient below 1 promotes a class, a coefficient above 1 suppresses
+    it, and 1 leaves it unchanged. The adjusted values are decision scores,
+    not probabilities.
+    """
+    probabilities = np.asarray(y_proba, dtype=np.float64)
+    if probabilities.ndim != 2:
+        raise ValueError(
+            f"Expected a 2D probability array, got shape {probabilities.shape}."
+        )
+    if probabilities.shape[1] == 0:
+        raise ValueError("The probability array must contain at least one class.")
+    if not np.all(np.isfinite(probabilities)):
+        raise ValueError("The probability array contains a non-finite value.")
+
+    adjusted_scores = probabilities.copy()
+    for class_id, coefficient_raw in class_coefficients.items():
+        if class_id < 0 or class_id >= probabilities.shape[1]:
+            raise ValueError(
+                f"Score-scaling class ID is out of range: {class_id}"
+            )
+        coefficient = float(coefficient_raw)
+        if not np.isfinite(coefficient) or coefficient <= 0.0:
+            raise ValueError(
+                f"Score coefficient for class {class_id} must be finite "
+                "and greater than zero."
+            )
+        adjusted_scores[:, class_id] /= coefficient
+
+    return np.argmax(adjusted_scores, axis=1).astype(np.int64)
+
+
 def apply_prediction_thresholds(
     y_proba: np.ndarray,
     class_thresholds: Dict[int, float],
 ) -> np.ndarray:
-    """
-    Reject a thresholded class when its probability is too low.
-
-    Classes are considered from highest to lowest probability. R2L and U2R
-    must pass their configured thresholds; classes without a threshold are
-    accepted normally.
-    """
+    """Apply the legacy rare-class rejection rule used by older scripts."""
     probabilities = np.asarray(y_proba)
     if probabilities.ndim != 2:
         raise ValueError(
@@ -220,19 +253,266 @@ def apply_prediction_thresholds(
 
     ranked_classes = np.argsort(probabilities, axis=1)[:, ::-1]
     predictions = np.empty(len(probabilities), dtype=np.int64)
-
     for row_index, ranking in enumerate(ranked_classes):
-        # At least one of the unthresholded classes will normally be accepted.
         selected_class = int(ranking[0])
         for class_id_raw in ranking:
             class_id = int(class_id_raw)
             threshold = class_thresholds.get(class_id)
-            if threshold is None or probabilities[row_index, class_id] >= threshold:
+            if (
+                threshold is None
+                or probabilities[row_index, class_id] >= threshold
+            ):
                 selected_class = class_id
                 break
         predictions[row_index] = selected_class
 
     return predictions
+
+
+def score_coefficient_values(
+    minimum: float,
+    maximum: float,
+    step: float,
+) -> List[float]:
+    """Build an inclusive coefficient grid without floating-point drift."""
+    if (
+        not np.isfinite(minimum)
+        or not np.isfinite(maximum)
+        or not np.isfinite(step)
+        or minimum <= 0.0
+        or maximum < minimum
+        or step <= 0.0
+    ):
+        raise ValueError(
+            "Coefficient grid requires finite values, minimum > 0, "
+            "maximum >= minimum, and step > 0."
+        )
+    values = [
+        minimum + index * step
+        for index in range(
+            int(np.floor((maximum - minimum) / step + 1e-9)) + 1
+        )
+    ]
+    if not np.isclose(values[-1], maximum):
+        values.append(maximum)
+    if minimum <= 1.0 <= maximum:
+        values.append(1.0)
+    return sorted({round(float(value), 10) for value in values})
+
+
+def parse_score_coefficient_values(raw: str) -> List[float]:
+    """Parse a comma-separated, positive score-coefficient list."""
+    try:
+        values = [
+            float(value.strip())
+            for value in raw.split(",")
+            if value.strip()
+        ]
+    except ValueError as exc:
+        raise ValueError(
+            "Score coefficients must be comma-separated numbers."
+        ) from exc
+    if not values:
+        raise ValueError("Provide at least one score coefficient.")
+    if any(not np.isfinite(value) or value <= 0.0 for value in values):
+        raise ValueError(
+            "Every score coefficient must be finite and greater than zero."
+        )
+    return sorted({round(value, 10) for value in values})
+
+
+def score_scaling_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    raw_y_pred: np.ndarray,
+) -> Dict[str, float]:
+    """Metrics used to rank validation-set score coefficients."""
+    per_class_recall = recall_score(
+        y_true,
+        y_pred,
+        labels=np.arange(5),
+        average=None,
+        zero_division=0,
+    )
+    per_class_f1 = f1_score(
+        y_true,
+        y_pred,
+        labels=np.arange(5),
+        average=None,
+        zero_division=0,
+    )
+    changed = int(np.count_nonzero(y_pred != raw_y_pred))
+    return {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "mcc": float(matthews_corrcoef(y_true, y_pred)),
+        "macro_f1": float(
+            f1_score(
+                y_true,
+                y_pred,
+                labels=np.arange(5),
+                average="macro",
+                zero_division=0,
+            )
+        ),
+        "macro_recall": float(np.mean(per_class_recall)),
+        "r2l_recall": float(per_class_recall[2]),
+        "u2r_recall": float(per_class_recall[3]),
+        "minority_recall": float(np.mean(per_class_recall[[2, 3]])),
+        "minimum_minority_recall": float(
+            np.min(per_class_recall[[2, 3]])
+        ),
+        "minority_recall_gap": float(
+            abs(per_class_recall[2] - per_class_recall[3])
+        ),
+        "r2l_f1": float(per_class_f1[2]),
+        "u2r_f1": float(per_class_f1[3]),
+        "rare_f1": float(np.mean(per_class_f1[[2, 3]])),
+        "changed_predictions": float(changed),
+        "change_rate": float(changed / len(y_true)),
+    }
+
+
+def search_score_coefficients(
+    y_val: np.ndarray,
+    val_probabilities: np.ndarray,
+    candidates: List[float],
+    macro_f1_retention: float = 0.90,
+) -> Tuple[Dict[str, float], List[Dict[str, float]]]:
+    """
+    Select coefficients using validation data only.
+
+    Candidates must first retain the requested fraction of raw validation
+    macro-F1. Among eligible pairs, ranking maximizes the weaker of R2L/U2R
+    recall, then their mean. Remaining metrics favor precise, balanced, and
+    less-disruptive predictions.
+    """
+    y_val = np.asarray(y_val)
+    probabilities = np.asarray(val_probabilities)
+    if probabilities.ndim != 2 or probabilities.shape[1] != 5:
+        raise ValueError(
+            f"Expected validation probability shape (n, 5), "
+            f"got {probabilities.shape}."
+        )
+    if len(y_val) == 0 or len(y_val) != len(probabilities):
+        raise ValueError(
+            "Validation labels and probabilities must have the same "
+            "non-zero length."
+        )
+    if not candidates:
+        raise ValueError("The score-coefficient grid cannot be empty.")
+    if not 0.0 <= macro_f1_retention <= 1.0:
+        raise ValueError("Macro-F1 retention must be between 0 and 1.")
+
+    raw_predictions = np.argmax(probabilities, axis=1)
+    raw_metrics = score_scaling_metrics(
+        y_val,
+        raw_predictions,
+        raw_predictions,
+    )
+    minimum_macro_f1 = (
+        raw_metrics["macro_f1"] * float(macro_f1_retention)
+    )
+    rows: List[Dict[str, float]] = []
+    for r2l_coefficient in candidates:
+        for u2r_coefficient in candidates:
+            predictions = apply_class_score_scaling(
+                probabilities,
+                {
+                    2: r2l_coefficient,
+                    3: u2r_coefficient,
+                },
+            )
+            metrics = score_scaling_metrics(
+                y_val,
+                predictions,
+                raw_predictions,
+            )
+            rows.append(
+                {
+                    "r2l_score_coefficient": float(r2l_coefficient),
+                    "u2r_score_coefficient": float(u2r_coefficient),
+                    "distance_from_argmax": float(
+                        abs(np.log(r2l_coefficient))
+                        + abs(np.log(u2r_coefficient))
+                    ),
+                    "minimum_allowed_macro_f1": minimum_macro_f1,
+                    "meets_macro_f1_retention": float(
+                        metrics["macro_f1"] >= minimum_macro_f1
+                    ),
+                    **metrics,
+                }
+            )
+
+    rows.sort(
+        key=lambda row: (
+            -row["meets_macro_f1_retention"],
+            -row["minimum_minority_recall"],
+            -row["minority_recall"],
+            -row["rare_f1"],
+            row["minority_recall_gap"],
+            -row["macro_f1"],
+            -row["mcc"],
+            -row["accuracy"],
+            row["change_rate"],
+            row["distance_from_argmax"],
+            row["r2l_score_coefficient"],
+            row["u2r_score_coefficient"],
+        )
+    )
+    return rows[0], rows
+
+
+def select_synth_for_targets(
+    synth_pool: pd.DataFrame,
+    real_labels: np.ndarray,
+    targets: Dict[int, int],
+) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+    """
+    Take deterministic class-specific subsets from one cached synthetic pool.
+
+    Each target is the desired real+synthetic class total. For example, if
+    real R2L has 995 records, target 5000 selects 4005 cached R2L records.
+    """
+    if "class" not in synth_pool.columns:
+        raise ValueError("The synthetic pool must contain a 'class' column.")
+
+    real_labels = np.asarray(real_labels, dtype=np.int64)
+    if np.any((real_labels < 0) | (real_labels >= 5)):
+        raise ValueError("Real training labels must be class IDs from 0 to 4.")
+    real_counts = np.bincount(real_labels, minlength=5)
+
+    numeric_labels = pd.to_numeric(synth_pool["class"], errors="coerce")
+    if numeric_labels.isna().any():
+        raise ValueError("The synthetic pool contains a non-numeric class.")
+    pool_labels = numeric_labels.to_numpy(dtype=np.float64)
+    if np.any(pool_labels != np.floor(pool_labels)):
+        raise ValueError("Synthetic class IDs must be integers.")
+    pool_labels = pool_labels.astype(np.int64)
+    if np.any((pool_labels < 0) | (pool_labels >= 5)):
+        raise ValueError("Synthetic class IDs must be between 0 and 4.")
+    pool_counts = np.bincount(pool_labels, minlength=5)
+
+    selected_indices: List[int] = []
+    for class_id in range(5):
+        target = int(targets.get(class_id, 0))
+        if target < 0:
+            raise ValueError("Synthetic class targets cannot be negative.")
+        needed = max(0, target - int(real_counts[class_id]))
+        available_indices = np.flatnonzero(pool_labels == class_id)
+        if needed > len(available_indices):
+            class_name = CLASS_NAMES[class_id]
+            raise ValueError(
+                f"Target {target} for {class_name} needs {needed} synthetic "
+                f"rows, but the cached pool contains only "
+                f"{len(available_indices)}. Generate a larger synthetic pool."
+            )
+        selected_indices.extend(
+            int(index) for index in available_indices[:needed]
+        )
+
+    selected = synth_pool.iloc[selected_indices].copy().reset_index(drop=True)
+    selected["class"] = selected["class"].astype(np.int64)
+    return selected, real_counts, pool_counts
 
 
 class BalancedBatchSequence(tf.keras.utils.Sequence):
@@ -434,7 +714,15 @@ def main() -> None:
     # CTGAN targets (defaults: R2L-only to 5000, U2R disabled)
     parser.add_argument("--target-dos", type=int, default=0)
     parser.add_argument("--target-probe", type=int, default=0)
-    parser.add_argument("--target-r2l", type=int, default=5000)
+    parser.add_argument(
+        "--target-r2l",
+        type=int,
+        default=5000,
+        help=(
+            "Desired real+synthetic R2L total before the real validation "
+            "holdout; this is not the number of rows generated."
+        ),
+    )
     parser.add_argument("--target-u2r", type=int, default=0)
     parser.add_argument("--target-normal", type=int, default=0)
 
@@ -455,22 +743,155 @@ def main() -> None:
     parser.add_argument("--no-bn", action="store_true")
     parser.add_argument("--no-residual", action="store_true")
 
-    # Fixed post-training decision policy from the final pipeline.
-    parser.add_argument("--r2l-threshold", type=float, default=0.55)
-    parser.add_argument("--u2r-threshold", type=float, default=0.40)
+    # Post-training score-scaling policy.
     parser.add_argument(
+        "--r2l-score-coefficient",
+        "--r2l-threshold",
+        dest="r2l_score_coefficient",
+        type=float,
+        default=None,
+        help=(
+            "Use this fixed R2L coefficient. If both class coefficients are "
+            "omitted, they are selected on validation data."
+        ),
+    )
+    parser.add_argument(
+        "--u2r-score-coefficient",
+        "--u2r-threshold",
+        dest="u2r_score_coefficient",
+        type=float,
+        default=None,
+        help=(
+            "Use this fixed U2R coefficient. If both class coefficients are "
+            "omitted, they are selected on validation data."
+        ),
+    )
+    parser.add_argument("--coefficient-min", type=float, default=0.05)
+    parser.add_argument("--coefficient-max", type=float, default=2.00)
+    parser.add_argument("--coefficient-step", type=float, default=0.15)
+    parser.add_argument(
+        "--coefficient-values",
+        default=None,
+        help=(
+            "Optional comma-separated coefficient grid. When provided, "
+            "it replaces coefficient-min/max/step."
+        ),
+    )
+    parser.add_argument(
+        "--min-validation-macro-f1-retention",
+        type=float,
+        default=0.90,
+        help=(
+            "Coefficient pairs must retain at least this fraction of raw "
+            "validation macro-F1 before minority recall is optimized."
+        ),
+    )
+    parser.add_argument(
+        "--no-score-scaling",
         "--no-thresholds",
+        dest="no_score_scaling",
         action="store_true",
-        help="Use ordinary argmax predictions instead of the fixed R2L/U2R thresholds.",
+        help="Use ordinary argmax instead of class-specific score scaling.",
     )
 
     args = parser.parse_args()
     if args.minority_per_batch < 0:
         parser.error("--minority-per-batch must be 0 or greater.")
-    if not 0.0 <= args.r2l_threshold <= 1.0:
-        parser.error("--r2l-threshold must be between 0 and 1.")
-    if not 0.0 <= args.u2r_threshold <= 1.0:
-        parser.error("--u2r-threshold must be between 0 and 1.")
+    for option_name, target in [
+        ("--target-dos", args.target_dos),
+        ("--target-probe", args.target_probe),
+        ("--target-r2l", args.target_r2l),
+        ("--target-u2r", args.target_u2r),
+        ("--target-normal", args.target_normal),
+    ]:
+        if target < 0:
+            parser.error(f"{option_name} must be 0 or greater.")
+    fixed_coefficients_given = (
+        args.r2l_score_coefficient is not None
+        or args.u2r_score_coefficient is not None
+    )
+    if fixed_coefficients_given and (
+        args.r2l_score_coefficient is None
+        or args.u2r_score_coefficient is None
+    ):
+        parser.error(
+            "Provide both --r2l-score-coefficient and "
+            "--u2r-score-coefficient, or omit both to tune them."
+        )
+    for option_name, coefficient in [
+        ("--r2l-score-coefficient", args.r2l_score_coefficient),
+        ("--u2r-score-coefficient", args.u2r_score_coefficient),
+    ]:
+        if coefficient is not None and (
+            not np.isfinite(coefficient) or coefficient <= 0.0
+        ):
+            parser.error(
+                f"{option_name} must be finite and greater than zero."
+            )
+    if args.no_score_scaling and fixed_coefficients_given:
+        parser.error(
+            "--no-score-scaling cannot be combined with fixed score "
+            "coefficients."
+        )
+    if not np.isfinite(args.coefficient_min) or args.coefficient_min <= 0.0:
+        parser.error("--coefficient-min must be finite and greater than zero.")
+    if (
+        not np.isfinite(args.coefficient_max)
+        or args.coefficient_max < args.coefficient_min
+    ):
+        parser.error(
+            "--coefficient-max must be finite and at least --coefficient-min."
+        )
+    if not np.isfinite(args.coefficient_step) or args.coefficient_step <= 0.0:
+        parser.error("--coefficient-step must be finite and greater than zero.")
+    if not (
+        np.isfinite(args.min_validation_macro_f1_retention)
+        and 0.0 <= args.min_validation_macro_f1_retention <= 1.0
+    ):
+        parser.error(
+            "--min-validation-macro-f1-retention must be between 0 and 1."
+        )
+    auto_tune_score_scaling = (
+        not args.no_score_scaling and not fixed_coefficients_given
+    )
+    explicit_coefficient_candidates: List[float] | None = None
+    if args.coefficient_values and not auto_tune_score_scaling:
+        parser.error(
+            "--coefficient-values is only used when coefficients are "
+            "selected by validation search."
+        )
+    if auto_tune_score_scaling:
+        if args.coefficient_values:
+            try:
+                explicit_coefficient_candidates = (
+                    parse_score_coefficient_values(args.coefficient_values)
+                )
+            except ValueError as error:
+                parser.error(str(error))
+            if 1.0 not in explicit_coefficient_candidates:
+                parser.error(
+                    "--coefficient-values must include 1.0, which is the "
+                    "raw-argmax operating point."
+                )
+            estimated_candidates = len(explicit_coefficient_candidates)
+        else:
+            if not args.coefficient_min <= 1.0 <= args.coefficient_max:
+                parser.error(
+                    "The coefficient search range must include 1.0, which "
+                    "is the raw-argmax operating point."
+                )
+            estimated_candidates = (
+                (args.coefficient_max - args.coefficient_min)
+                / args.coefficient_step
+                + 2.0
+            )
+        if not np.isfinite(estimated_candidates) or (
+            estimated_candidates > np.sqrt(100_000)
+        ):
+            parser.error(
+                "The coefficient grid is too large. Increase "
+                "--coefficient-step or narrow the search range."
+            )
 
     tf.keras.utils.set_random_seed(args.seed)
     np.random.seed(args.seed)
@@ -514,6 +935,25 @@ def main() -> None:
                 "Precompute it with --ctgan-train (or point --synth-path to an existing CSV)."
             )
 
+    synth_pool_df = synth_df
+    missing_synth_columns = sorted(
+        set(train_df.columns) - set(synth_pool_df.columns)
+    )
+    extra_synth_columns = sorted(
+        set(synth_pool_df.columns) - set(train_df.columns)
+    )
+    if missing_synth_columns or extra_synth_columns:
+        raise ValueError(
+            "Synthetic pool columns do not match KDDTrain+. "
+            f"Missing={missing_synth_columns}, extra={extra_synth_columns}"
+        )
+    synth_pool_df = synth_pool_df[train_df.columns]
+    synth_df, real_counts, synth_pool_counts = select_synth_for_targets(
+        synth_pool=synth_pool_df,
+        real_labels=train_df["class"].to_numpy(dtype=np.int64),
+        targets=targets,
+    )
+
     if args.ctgan_only:
         synth_counts = (
             np.bincount(synth_df["class"].to_numpy(dtype=np.int64), minlength=5)
@@ -523,17 +963,24 @@ def main() -> None:
         print("\n=== CTGAN precompute complete (ctgan-only) ===")
         print("Synth path:", synth_path)
         print("Targets:", targets)
-        print("Synth class counts:", synth_counts)
+        print("Cached pool class counts:", synth_pool_counts)
+        print("Selected synth class counts:", synth_counts)
         return
 
     # Combine train + synth
-    import pandas as pd  # local import
-
-    train_aug_df = (
-        pd.concat([train_df, synth_df], ignore_index=True)
-        .sample(frac=1.0, random_state=args.seed)
+    source_column = "__is_real_training_record__"
+    if source_column in train_df.columns or source_column in synth_df.columns:
+        raise ValueError(f"Unexpected reserved column: {source_column}")
+    real_tagged = train_df.copy()
+    synth_tagged = synth_df.copy()
+    real_tagged[source_column] = True
+    synth_tagged[source_column] = False
+    train_aug_tagged = (
+        pd.concat([real_tagged, synth_tagged], ignore_index=True)
         .reset_index(drop=True)
     )
+    source_is_real = train_aug_tagged.pop(source_column).to_numpy(dtype=bool)
+    train_aug_df = train_aug_tagged
 
     # Fit OHE + scaler on REAL train only (stable 121 layout)
     categorical_columns = ["protocol_type", "service", "flag"]
@@ -583,14 +1030,30 @@ def main() -> None:
 
     X_all, y_all, X_test, y_test = prepare_xy_from_processed(train_proc, test_proc)
 
-    # Split train/val for macro-F1 checkpointing
-    X_tr, X_val, y_tr, y_val = train_test_split(
-        X_all,
-        y_all,
+    # Split only REAL records so every augmentation target uses the same
+    # validation fold. Synthetic records are added only to model training.
+    X_real = X_all[source_is_real]
+    y_real = y_all[source_is_real]
+    X_synth = X_all[~source_is_real]
+    y_synth = y_all[~source_is_real]
+    (
+        X_real_tr,
+        X_val,
+        y_real_tr,
+        y_val,
+    ) = train_test_split(
+        X_real,
+        y_real,
         test_size=float(args.val_split),
         random_state=args.seed,
-        stratify=y_all,
+        stratify=y_real,
     )
+    X_tr = np.concatenate([X_real_tr, X_synth], axis=0)
+    y_tr = np.concatenate([y_real_tr, y_synth], axis=0)
+    train_order = np.random.default_rng(args.seed).permutation(len(y_tr))
+    X_tr = X_tr[train_order]
+    y_tr = y_tr[train_order]
+    real_validation_counts = np.bincount(y_val, minlength=5)
 
     # Focal alpha on training split
     alpha, alpha_counts = compute_cb_alpha_effective_number(y_tr, beta=args.cb_beta, num_classes=5)
@@ -668,24 +1131,134 @@ def main() -> None:
     model.save(model_path)
     best_val_macro_f1 = max(history.history.get("val_macro_f1", [0.0]))
 
-    # Evaluate raw Softmax predictions, then apply the fixed deployment policy.
+    # Select the deployment policy without looking at KDDTest+.
+    coefficient_search_path: Path | None = None
+    coefficient_pair_count = 0
+    raw_validation_metrics: Dict[str, float] | None = None
+    selected_validation_metrics: Dict[str, float] | None = None
+    if args.no_score_scaling:
+        score_scaling_selection = "disabled"
+        class_score_coefficients = {2: 1.0, 3: 1.0}
+    elif fixed_coefficients_given:
+        score_scaling_selection = "fixed_cli_coefficients"
+        class_score_coefficients = {
+            2: float(args.r2l_score_coefficient),
+            3: float(args.u2r_score_coefficient),
+        }
+    else:
+        score_scaling_selection = "validation_grid_search"
+        if (
+            real_validation_counts[2] == 0
+            or real_validation_counts[3] == 0
+        ):
+            raise ValueError(
+                "Cannot tune score coefficients because the real validation "
+                "subset does not contain both R2L and U2R records."
+            )
+        candidates = (
+            explicit_coefficient_candidates
+            if explicit_coefficient_candidates is not None
+            else score_coefficient_values(
+                args.coefficient_min,
+                args.coefficient_max,
+                args.coefficient_step,
+            )
+        )
+        coefficient_pair_count = len(candidates) ** 2
+        if coefficient_pair_count > 100_000:
+            raise ValueError(
+                "The coefficient grid contains "
+                f"{coefficient_pair_count} pairs. "
+                "Increase --coefficient-step or narrow the search range."
+            )
+        print(
+            f"Searching {coefficient_pair_count} R2L/U2R "
+            "score-coefficient pairs "
+            "on real validation records..."
+        )
+        print("Real validation class counts:", real_validation_counts)
+        val_probabilities = model.predict(
+            X_val,
+            batch_size=args.batch_size,
+            verbose=0,
+        )
+        raw_val_predictions = np.argmax(val_probabilities, axis=1)
+        raw_validation_metrics = score_scaling_metrics(
+            y_val,
+            raw_val_predictions,
+            raw_val_predictions,
+        )
+        (
+            selected_validation_metrics,
+            search_rows,
+        ) = search_score_coefficients(
+            y_val,
+            val_probabilities,
+            candidates,
+            macro_f1_retention=(
+                args.min_validation_macro_f1_retention
+            ),
+        )
+        class_score_coefficients = {
+            2: selected_validation_metrics["r2l_score_coefficient"],
+            3: selected_validation_metrics["u2r_score_coefficient"],
+        }
+        coefficient_search_path = (
+            paths.results_dir / f"{prefix}_score_scaling_search.csv"
+        )
+        search_frame = pd.DataFrame(search_rows)
+        search_frame.insert(
+            0,
+            "rank",
+            np.arange(1, len(search_frame) + 1),
+        )
+        search_frame.to_csv(coefficient_search_path, index=False)
+        print(
+            "Selected validation coefficients: "
+            f"R2L={class_score_coefficients[2]:.4f}, "
+            f"U2R={class_score_coefficients[3]:.4f}"
+        )
+        boundary_hits = []
+        if np.isclose(
+            class_score_coefficients[2],
+            args.coefficient_min,
+        ):
+            boundary_hits.append("R2L minimum")
+        if np.isclose(
+            class_score_coefficients[2],
+            args.coefficient_max,
+        ):
+            boundary_hits.append("R2L maximum")
+        if np.isclose(
+            class_score_coefficients[3],
+            args.coefficient_min,
+        ):
+            boundary_hits.append("U2R minimum")
+        if np.isclose(
+            class_score_coefficients[3],
+            args.coefficient_max,
+        ):
+            boundary_hits.append("U2R maximum")
+        if boundary_hits:
+            print(
+                "WARNING: selected coefficient reached the search boundary "
+                f"({', '.join(boundary_hits)})."
+            )
+
+    score_scaling_applied = not args.no_score_scaling
+
+    # The coefficient pair is now frozen; evaluate KDDTest+ exactly once.
     loss, keras_argmax_acc = model.evaluate(X_test, y_test, verbose=0)
     y_proba = model.predict(X_test, verbose=0)
     raw_y_pred = np.argmax(y_proba, axis=1)
-
-    class_thresholds = {
-        2: float(args.r2l_threshold),
-        3: float(args.u2r_threshold),
-    }
-    thresholds_applied = not args.no_thresholds
     y_pred = (
-        apply_prediction_thresholds(y_proba, class_thresholds)
-        if thresholds_applied
+        apply_class_score_scaling(y_proba, class_score_coefficients)
+        if score_scaling_applied
         else raw_y_pred.copy()
     )
     changed_predictions = int(np.count_nonzero(y_pred != raw_y_pred))
-    r2l_rejections = int(np.count_nonzero((raw_y_pred == 2) & (y_pred != 2)))
-    u2r_rejections = int(np.count_nonzero((raw_y_pred == 3) & (y_pred != 3)))
+    r2l_losses = int(np.count_nonzero((raw_y_pred == 2) & (y_pred != 2)))
+    u2r_losses = int(np.count_nonzero((raw_y_pred == 3) & (y_pred != 3)))
     r2l_gains = int(np.count_nonzero((raw_y_pred != 2) & (y_pred == 2)))
     u2r_gains = int(np.count_nonzero((raw_y_pred != 3) & (y_pred == 3)))
 
@@ -726,7 +1299,7 @@ def main() -> None:
     mcc = matthews_corrcoef(y_test, y_pred)
     acc_sklearn = accuracy_score(y_test, y_pred)
 
-    if thresholds_applied:
+    if score_scaling_applied:
         save_confusion_matrices(
             y_test,
             raw_y_pred,
@@ -737,9 +1310,9 @@ def main() -> None:
     save_multiclass_roc(y_test, y_proba, paths.results_dir, prefix)
 
     # Count summary
-    real_counts = np.bincount(train_df["class"].to_numpy(dtype=np.int64), minlength=5)
     synth_counts = np.bincount(synth_df["class"].to_numpy(dtype=np.int64), minlength=5) if len(synth_df) else np.zeros(5, dtype=np.int64)
     aug_counts = np.bincount(y_all, minlength=5)
+    training_counts = np.bincount(y_tr, minlength=5)
 
     out_txt = paths.results_dir / f"{prefix}_results.txt"
     with out_txt.open("w", encoding="utf-8") as f:
@@ -753,9 +1326,14 @@ def main() -> None:
         f.write(f"feature_grid_tsv: {grid_path}\n\n")
         f.write(f"synth_path: {synth_path}\n")
         f.write(f"targets: {targets}\n")
+        f.write(f"target_r2l: {args.target_r2l}\n")
+        f.write(f"target_u2r: {args.target_u2r}\n")
         f.write(f"real_counts: {real_counts.tolist()}\n")
+        f.write(f"synth_pool_counts: {synth_pool_counts.tolist()}\n")
         f.write(f"synth_counts: {synth_counts.tolist()}\n")
         f.write(f"aug_counts: {aug_counts.tolist()}\n\n")
+        f.write(f"training_counts: {training_counts.tolist()}\n")
+        f.write(f"r2l_synthetic_rows_used: {int(synth_counts[2])}\n\n")
         f.write(f"focal_gamma: {args.focal_gamma}\n")
         f.write(f"cb_beta: {args.cb_beta}\n")
         f.write(f"minority_per_batch: {args.minority_per_batch}\n")
@@ -770,14 +1348,91 @@ def main() -> None:
         f.write(f"use_residual: {not args.no_residual}\n\n")
         f.write(f"Model Parameters: {model_parameters}\n")
         f.write(f"Best Validation Macro F1: {best_val_macro_f1}\n\n")
-        f.write(f"thresholds_applied: {thresholds_applied}\n")
-        f.write(f"r2l_threshold: {args.r2l_threshold}\n")
-        f.write(f"u2r_threshold: {args.u2r_threshold}\n")
-        f.write(f"threshold_changed_predictions: {changed_predictions}\n\n")
-        f.write(f"r2l_rejections: {r2l_rejections}\n")
-        f.write(f"u2r_rejections: {u2r_rejections}\n")
-        f.write(f"r2l_gains_from_rerouting: {r2l_gains}\n")
-        f.write(f"u2r_gains_from_rerouting: {u2r_gains}\n\n")
+        decision_policy = (
+            "class_specific_score_scaling"
+            if score_scaling_applied
+            else "raw_argmax"
+        )
+        f.write(f"decision_policy: {decision_policy}\n")
+        f.write(f"score_scaling_applied: {score_scaling_applied}\n")
+        f.write(f"score_scaling_selection: {score_scaling_selection}\n")
+        if score_scaling_selection == "validation_grid_search":
+            f.write(
+                "score_scaling_selection_data: "
+                "real_validation_records_only\n"
+            )
+            f.write(
+                "score_scaling_selection_objective: retain validation "
+                "macro-F1, then maximize the lower R2L/U2R recall, their "
+                "mean, and rare-class F1\n"
+            )
+        elif score_scaling_selection == "fixed_cli_coefficients":
+            f.write("score_scaling_selection_data: command_line\n")
+        else:
+            f.write("score_scaling_selection_data: not_applicable\n")
+        f.write(
+            f"real_validation_counts: "
+            f"{real_validation_counts.tolist()}\n"
+        )
+        f.write(
+            "r2l_score_coefficient: "
+            f"{class_score_coefficients[2]}\n"
+        )
+        f.write(
+            "u2r_score_coefficient: "
+            f"{class_score_coefficients[3]}\n"
+        )
+        f.write(
+            "r2l_score_multiplier: "
+            f"{1.0 / class_score_coefficients[2]}\n"
+        )
+        f.write(
+            "u2r_score_multiplier: "
+            f"{1.0 / class_score_coefficients[3]}\n"
+        )
+        f.write(f"coefficient_min: {args.coefficient_min}\n")
+        f.write(f"coefficient_max: {args.coefficient_max}\n")
+        f.write(f"coefficient_step: {args.coefficient_step}\n")
+        f.write(
+            "coefficient_values: "
+            f"{args.coefficient_values or 'uniform_min_max_step'}\n"
+        )
+        f.write(
+            "min_validation_macro_f1_retention: "
+            f"{args.min_validation_macro_f1_retention}\n"
+        )
+        f.write(f"coefficient_pairs_searched: {coefficient_pair_count}\n")
+        f.write(f"coefficient_search_csv: {coefficient_search_path}\n")
+        if (
+            raw_validation_metrics is not None
+            and selected_validation_metrics is not None
+        ):
+            for metric_name in [
+                "accuracy",
+                "mcc",
+                "macro_f1",
+                "macro_recall",
+                "r2l_recall",
+                "u2r_recall",
+                "minimum_minority_recall",
+                "minority_recall",
+                "rare_f1",
+            ]:
+                f.write(
+                    f"raw_validation_{metric_name}: "
+                    f"{raw_validation_metrics[metric_name]}\n"
+                )
+                f.write(
+                    f"selected_validation_{metric_name}: "
+                    f"{selected_validation_metrics[metric_name]}\n"
+                )
+        f.write(
+            f"score_scaling_changed_predictions: {changed_predictions}\n\n"
+        )
+        f.write(f"r2l_predictions_lost_after_scaling: {r2l_losses}\n")
+        f.write(f"u2r_predictions_lost_after_scaling: {u2r_losses}\n")
+        f.write(f"r2l_predictions_gained_after_scaling: {r2l_gains}\n")
+        f.write(f"u2r_predictions_gained_after_scaling: {u2r_gains}\n\n")
         f.write(f"Test Loss: {loss}\n")
         f.write(f"Test Accuracy (keras): {keras_argmax_acc}\n")
         f.write(f"Raw Argmax Test Accuracy: {raw_accuracy}\n")
@@ -803,14 +1458,17 @@ def main() -> None:
     print("Feature layout:", args.feature_layout)
     print("Feature grid:", grid_path)
     print("Real train counts:", real_counts)
-    print("Synth counts:", synth_counts)
+    print("Cached synth pool counts:", synth_pool_counts)
+    print("Selected synth counts:", synth_counts)
     print("Aug counts:", aug_counts)
+    print("Actual training counts:", training_counts)
     print("Alpha:", alpha)
-    print("Thresholds applied:", thresholds_applied)
-    print("Class thresholds:", class_thresholds)
+    print("Score scaling applied:", score_scaling_applied)
+    print("Score coefficient selection:", score_scaling_selection)
+    print("Class score coefficients:", class_score_coefficients)
     print("Changed predictions:", changed_predictions)
-    print("R2L rejections / gains:", r2l_rejections, "/", r2l_gains)
-    print("U2R rejections / gains:", u2r_rejections, "/", u2r_gains)
+    print("R2L predictions lost / gained:", r2l_losses, "/", r2l_gains)
+    print("U2R predictions lost / gained:", u2r_losses, "/", u2r_gains)
     print(f"Test loss: {loss:.6f}")
     print(f"Raw argmax accuracy: {raw_accuracy:.6f}")
     print(f"Raw argmax macro-F1: {raw_test_macro_f1:.6f}")
@@ -829,6 +1487,8 @@ def main() -> None:
     print(report)
     print(f"\nSaved: {out_txt}")
     print(f"Saved model: {model_path}")
+    if coefficient_search_path is not None:
+        print(f"Saved coefficient search: {coefficient_search_path}")
 
 
 if __name__ == "__main__":

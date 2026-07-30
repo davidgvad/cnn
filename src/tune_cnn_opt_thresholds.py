@@ -1,14 +1,14 @@
 """
-Tune R2L/U2R decision thresholds for an already-trained cnn_opt Conv2D model.
+Tune R2L/U2R score coefficients for an already-trained cnn_opt Conv2D model.
 
-Thresholds are selected only on the reconstructed real-record subset of the
+Coefficients are selected only on the reconstructed real-record subset of the
 model's validation split. The objective first maximizes the weaker of the R2L
-and U2R recalls, then minimizes the gap between them. KDDTest+ is predicted
-only after the pair is fixed.
+and U2R recalls, then their mean and rare-class F1. KDDTest+ is predicted only
+after the pair is fixed.
 
 Decision rule:
-    adjusted_score[R2L] = probability[R2L] / r2l_threshold
-    adjusted_score[U2R] = probability[U2R] / u2r_threshold
+    adjusted_score[R2L] = probability[R2L] / r2l_coefficient
+    adjusted_score[U2R] = probability[U2R] / u2r_coefficient
 
 The other three class scores are unchanged. Therefore (1.0, 1.0) is ordinary
 argmax, values below 1 promote a rare class, and values above 1 suppress it.
@@ -26,11 +26,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from sklearn.metrics import (
-    accuracy_score,
     classification_report,
-    f1_score,
-    matthews_corrcoef,
-    recall_score,
 )
 from sklearn.model_selection import train_test_split
 
@@ -46,7 +42,14 @@ from cnn_gan_foc import (  # type: ignore
     prepare_xy_from_processed,
     save_confusion_matrices,
 )
-from cnn_opt import build_optimized_feature_order  # type: ignore
+from cnn_opt import (  # type: ignore
+    apply_class_score_scaling,
+    build_optimized_feature_order,
+    score_coefficient_values,
+    score_scaling_metrics,
+    search_score_coefficients,
+    select_synth_for_targets,
+)
 
 
 CATEGORICAL_COLUMNS = ["protocol_type", "service", "flag"]
@@ -144,12 +147,7 @@ def load_validation_and_test(
     expected_synth_counts: np.ndarray | None,
     expected_aug_counts: np.ndarray | None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Reproduce cnn_opt's augmented split, then retain only real validation rows.
-
-    The source marker follows the exact same shuffle and stratified split as
-    cnn_opt but is removed before preprocessing/model input.
-    """
+    """Reproduce cnn_opt's real-only validation split and KDDTest+ input."""
     paths = _repo_paths()
     train_df = load_nsl_kdd_txt(paths.data_dir / "KDDTrain+.txt").drop(
         columns=["num_outbound_cmds"]
@@ -162,11 +160,27 @@ def load_validation_and_test(
 
     if not synth_path.exists():
         raise FileNotFoundError(f"Cached CTGAN CSV not found: {synth_path}")
-    synth_df = pd.read_csv(synth_path)
+    synth_pool = pd.read_csv(synth_path)
     real_counts = np.bincount(
         train_df["class"].to_numpy(dtype=np.int64),
         minlength=5,
     )
+    if expected_synth_counts is not None:
+        targets = {
+            class_id: int(
+                real_counts[class_id] + expected_synth_counts[class_id]
+            )
+            for class_id in range(5)
+        }
+        synth_df, _, _ = select_synth_for_targets(
+            synth_pool,
+            train_df["class"].to_numpy(dtype=np.int64),
+            targets,
+        )
+    else:
+        # Compatibility for older result files that did not save selected
+        # synthetic counts.
+        synth_df = synth_pool
     synth_counts = np.bincount(
         synth_df["class"].to_numpy(dtype=np.int64),
         minlength=5,
@@ -178,20 +192,6 @@ def load_validation_and_test(
         real_counts + synth_counts,
         expected_aug_counts,
     )
-
-    source_column = "__real_source__"
-    if source_column in train_df.columns or source_column in synth_df.columns:
-        raise ValueError(f"Unexpected reserved column: {source_column}")
-    real_tagged = train_df.copy()
-    synth_tagged = synth_df.copy()
-    real_tagged[source_column] = True
-    synth_tagged[source_column] = False
-    augmented_tagged = (
-        pd.concat([real_tagged, synth_tagged], ignore_index=True)
-        .sample(frac=1.0, random_state=seed)
-        .reset_index(drop=True)
-    )
-    source_is_real = augmented_tagged.pop(source_column).to_numpy(dtype=bool)
 
     encoders, feature_names = fit_one_hot_encoders(
         train_df,
@@ -207,7 +207,7 @@ def load_validation_and_test(
 
     train_proc = apply_scaler(
         apply_one_hot(
-            augmented_tagged,
+            train_df,
             encoders,
             feature_names,
             CATEGORICAL_COLUMNS,
@@ -240,27 +240,16 @@ def load_validation_and_test(
         train_proc,
         test_proc,
     )
-    (
-        _,
-        X_val,
-        _,
-        y_val,
-        _,
-        val_is_real,
-    ) = train_test_split(
+    _, X_val, _, y_val = train_test_split(
         X_all,
         y_all,
-        source_is_real,
         test_size=val_split,
         random_state=seed,
         stratify=y_all,
     )
-    real_mask = np.asarray(val_is_real, dtype=bool)
-    X_val_real = X_val[real_mask]
-    y_val_real = y_val[real_mask]
-    if len(y_val_real) == 0:
+    if len(y_val) == 0:
         raise ValueError("The reconstructed validation split has no real rows.")
-    return X_val_real, y_val_real, X_test, y_test
+    return X_val, y_val, X_test, y_test
 
 
 def threshold_predictions(
@@ -268,14 +257,19 @@ def threshold_predictions(
     r2l_threshold: float,
     u2r_threshold: float,
 ) -> np.ndarray:
-    if r2l_threshold <= 0.0 or u2r_threshold <= 0.0:
-        raise ValueError("Decision thresholds must be greater than zero.")
-    scores = np.asarray(probabilities, dtype=np.float64).copy()
-    if scores.ndim != 2 or scores.shape[1] != 5:
-        raise ValueError(f"Expected probability shape (n, 5), got {scores.shape}.")
-    scores[:, 2] /= float(r2l_threshold)
-    scores[:, 3] /= float(u2r_threshold)
-    return np.argmax(scores, axis=1).astype(np.int64)
+    """Compatibility name for class-specific score scaling."""
+    probabilities = np.asarray(probabilities)
+    if probabilities.ndim != 2 or probabilities.shape[1] != 5:
+        raise ValueError(
+            f"Expected probability shape (n, 5), got {probabilities.shape}."
+        )
+    return apply_class_score_scaling(
+        probabilities,
+        {
+            2: float(r2l_threshold),
+            3: float(u2r_threshold),
+        },
+    )
 
 
 def calculate_metrics(
@@ -283,43 +277,7 @@ def calculate_metrics(
     y_pred: np.ndarray,
     raw_predictions: np.ndarray,
 ) -> Dict[str, float]:
-    per_class_recall = recall_score(
-        y_true,
-        y_pred,
-        labels=np.arange(5),
-        average=None,
-        zero_division=0,
-    )
-    per_class_f1 = f1_score(
-        y_true,
-        y_pred,
-        labels=np.arange(5),
-        average=None,
-        zero_division=0,
-    )
-    changed = int(np.count_nonzero(y_pred != raw_predictions))
-    return {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "mcc": float(matthews_corrcoef(y_true, y_pred)),
-        "macro_f1": float(
-            f1_score(y_true, y_pred, average="macro", zero_division=0)
-        ),
-        "macro_recall": float(np.mean(per_class_recall)),
-        "r2l_recall": float(per_class_recall[2]),
-        "u2r_recall": float(per_class_recall[3]),
-        "minority_recall": float(np.mean(per_class_recall[[2, 3]])),
-        "minimum_minority_recall": float(
-            np.min(per_class_recall[[2, 3]])
-        ),
-        "minority_recall_gap": float(
-            abs(per_class_recall[2] - per_class_recall[3])
-        ),
-        "r2l_f1": float(per_class_f1[2]),
-        "u2r_f1": float(per_class_f1[3]),
-        "rare_f1": float(np.mean(per_class_f1[[2, 3]])),
-        "changed_predictions": float(changed),
-        "change_rate": float(changed / len(y_true)),
-    }
+    return score_scaling_metrics(y_true, y_pred, raw_predictions)
 
 
 def threshold_values(
@@ -327,82 +285,29 @@ def threshold_values(
     maximum: float,
     step: float,
 ) -> List[float]:
-    count = int(np.floor((maximum - minimum) / step + 1e-9))
-    values = [minimum + index * step for index in range(count + 1)]
-    if not np.isclose(values[-1], maximum):
-        values.append(maximum)
-    values.append(1.0)
-    return sorted(
-        {
-            round(float(value), 10)
-            for value in values
-            if minimum <= value <= maximum
-        }
-    )
+    return score_coefficient_values(minimum, maximum, step)
 
 
 def search_thresholds(
     y_val: np.ndarray,
     val_probabilities: np.ndarray,
     candidates: List[float],
+    macro_f1_retention: float = 0.90,
 ) -> Tuple[Dict[str, Any], pd.DataFrame]:
-    raw_predictions = np.argmax(val_probabilities, axis=1)
-    rows: List[Dict[str, Any]] = []
-
-    for r2l_threshold in candidates:
-        for u2r_threshold in candidates:
-            predictions = threshold_predictions(
-                val_probabilities,
-                r2l_threshold,
-                u2r_threshold,
-            )
-            metrics = calculate_metrics(
-                y_val,
-                predictions,
-                raw_predictions,
-            )
-            distance_from_argmax = (
-                abs(np.log(r2l_threshold))
-                + abs(np.log(u2r_threshold))
-            )
-            row: Dict[str, Any] = {
-                "r2l_threshold": r2l_threshold,
-                "u2r_threshold": u2r_threshold,
-                "distance_from_argmax": float(distance_from_argmax),
-                **metrics,
-            }
-            rows.append(row)
-
-    if not rows:
-        raise ValueError("Threshold search produced no candidates.")
-    search_frame = pd.DataFrame(rows).sort_values(
-        by=[
-            "minimum_minority_recall",
-            "minority_recall_gap",
-            "minority_recall",
-            "rare_f1",
-            "macro_f1",
-            "mcc",
-            "accuracy",
-            "change_rate",
-            "distance_from_argmax",
-            "r2l_threshold",
-            "u2r_threshold",
-        ],
-        ascending=[
-            False,
-            True,
-            False,
-            False,
-            False,
-            False,
-            False,
-            True,
-            True,
-            True,
-            True,
-        ],
-    ).reset_index(drop=True)
+    _, rows = search_score_coefficients(
+        y_val,
+        val_probabilities,
+        candidates,
+        macro_f1_retention=macro_f1_retention,
+    )
+    search_frame = pd.DataFrame(rows)
+    # Legacy columns kept for existing analysis commands.
+    search_frame["r2l_threshold"] = search_frame[
+        "r2l_score_coefficient"
+    ]
+    search_frame["u2r_threshold"] = search_frame[
+        "u2r_score_coefficient"
+    ]
     search_frame.insert(0, "rank", np.arange(1, len(search_frame) + 1))
     best_row = search_frame.iloc[0].to_dict()
     return best_row, search_frame
@@ -429,7 +334,8 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description=(
-            "Tune cnn_opt thresholds for balanced R2L/U2R validation recall."
+            "Tune cnn_opt score coefficients for balanced R2L/U2R "
+            "validation recall."
         )
     )
     model_group = parser.add_mutually_exclusive_group(required=True)
@@ -464,10 +370,33 @@ def main() -> None:
         default=None,
         help="Defaults to the layout saved in the run's results file.",
     )
-    parser.add_argument("--threshold-min", type=float, default=0.05)
-    parser.add_argument("--threshold-max", type=float, default=2.00)
-    parser.add_argument("--threshold-step", type=float, default=0.05)
+    parser.add_argument(
+        "--coefficient-min",
+        "--threshold-min",
+        dest="threshold_min",
+        type=float,
+        default=0.05,
+    )
+    parser.add_argument(
+        "--coefficient-max",
+        "--threshold-max",
+        dest="threshold_max",
+        type=float,
+        default=2.00,
+    )
+    parser.add_argument(
+        "--coefficient-step",
+        "--threshold-step",
+        dest="threshold_step",
+        type=float,
+        default=0.15,
+    )
     parser.add_argument("--batch-size", type=int, default=1024)
+    parser.add_argument(
+        "--min-validation-macro-f1-retention",
+        type=float,
+        default=0.90,
+    )
     parser.add_argument("--output-prefix", default=None)
     args = parser.parse_args()
 
@@ -525,18 +454,46 @@ def main() -> None:
         parser.error(
             "Saved feature_layout must be either 'optimized' or 'legacy'."
         )
-    if args.threshold_min <= 0.0:
-        parser.error("--threshold-min must be greater than zero.")
-    if args.threshold_max < args.threshold_min:
-        parser.error("--threshold-max must be at least --threshold-min.")
+    if not np.isfinite(args.threshold_min) or args.threshold_min <= 0.0:
+        parser.error("--coefficient-min must be finite and greater than zero.")
+    if (
+        not np.isfinite(args.threshold_max)
+        or args.threshold_max < args.threshold_min
+    ):
+        parser.error(
+            "--coefficient-max must be finite and at least --coefficient-min."
+        )
     if not args.threshold_min <= 1.0 <= args.threshold_max:
         parser.error(
-            "The threshold range must include 1.0 (the raw-argmax baseline)."
+            "The coefficient range must include 1.0 "
+            "(the raw-argmax baseline)."
         )
-    if args.threshold_step <= 0.0:
-        parser.error("--threshold-step must be greater than zero.")
+    if not np.isfinite(args.threshold_step) or args.threshold_step <= 0.0:
+        parser.error(
+            "--coefficient-step must be finite and greater than zero."
+        )
+    estimated_candidates = (
+        (args.threshold_max - args.threshold_min)
+        / args.threshold_step
+        + 2.0
+    )
+    if (
+        not np.isfinite(estimated_candidates)
+        or estimated_candidates > np.sqrt(100_000)
+    ):
+        parser.error(
+            "The coefficient grid is too large. Increase "
+            "--coefficient-step or narrow the search range."
+        )
     if args.batch_size <= 0:
         parser.error("--batch-size must be greater than zero.")
+    if not (
+        np.isfinite(args.min_validation_macro_f1_retention)
+        and 0.0 <= args.min_validation_macro_f1_retention <= 1.0
+    ):
+        parser.error(
+            "--min-validation-macro-f1-retention must be between 0 and 1."
+        )
 
     print("Loading model:", model_path)
     model = tf.keras.models.load_model(model_path, compile=False)
@@ -558,10 +515,13 @@ def main() -> None:
         "Note: the original run did not save validation row IDs; this split is "
         "reconstructed from its seed and current data files."
     )
-    print(
-        "Real validation class counts:",
-        np.bincount(y_val, minlength=5),
-    )
+    validation_counts = np.bincount(y_val, minlength=5)
+    print("Real validation class counts:", validation_counts)
+    if validation_counts[2] == 0 or validation_counts[3] == 0:
+        raise SystemExit(
+            "The real validation subset must contain both R2L and U2R "
+            "records to tune their score coefficients."
+        )
     print("Predicting real validation rows once...")
     val_probabilities = model.predict(
         X_val,
@@ -575,13 +535,14 @@ def main() -> None:
         args.threshold_step,
     )
     print(
-        f"Searching {len(candidates) ** 2} threshold pairs "
+        f"Searching {len(candidates) ** 2} score-coefficient pairs "
         "using balanced validation R2L/U2R recall..."
     )
     best, search_frame = search_thresholds(
         y_val,
         val_probabilities,
         candidates,
+        macro_f1_retention=args.min_validation_macro_f1_retention,
     )
     r2l_threshold = float(best["r2l_threshold"])
     u2r_threshold = float(best["u2r_threshold"])
@@ -603,8 +564,8 @@ def main() -> None:
         raw_val_predictions,
     )
 
-    # KDDTest+ predictions are made only after the threshold pair is selected.
-    print("Thresholds selected. Predicting KDDTest+ once...")
+    # KDDTest+ is predicted only after the coefficient pair is selected.
+    print("Score coefficients selected. Predicting KDDTest+ once...")
     test_probabilities = model.predict(
         X_test,
         batch_size=args.batch_size,
@@ -638,7 +599,7 @@ def main() -> None:
         boundary_hits.append("U2R maximum")
     if boundary_hits:
         print(
-            "WARNING: selected threshold reached the search boundary "
+            "WARNING: a selected coefficient reached the search boundary "
             f"({', '.join(boundary_hits)})."
         )
 
@@ -658,6 +619,8 @@ def main() -> None:
         {
             "model": "cnn_opt_raw_argmax",
             "seed": seed,
+            "r2l_score_coefficient": 1.0,
+            "u2r_score_coefficient": 1.0,
             "r2l_threshold": 1.0,
             "u2r_threshold": 1.0,
             **raw_test_metrics,
@@ -665,6 +628,8 @@ def main() -> None:
         {
             "model": "cnn_opt_validation_tuned",
             "seed": seed,
+            "r2l_score_coefficient": r2l_threshold,
+            "u2r_score_coefficient": u2r_threshold,
             "r2l_threshold": r2l_threshold,
             "u2r_threshold": u2r_threshold,
             **tuned_test_metrics,
@@ -702,7 +667,9 @@ def main() -> None:
     )
 
     with results_path.open("w", encoding="utf-8") as output_file:
-        output_file.write("CNN_OPT validation-only threshold tuning\n\n")
+        output_file.write(
+            "CNN_OPT validation-only class-specific score scaling\n\n"
+        )
         output_file.write(f"source_run_name: {run_name}\n")
         output_file.write(f"source_model: {model_path}\n")
         output_file.write(f"source_results: {source_results_path}\n")
@@ -718,16 +685,34 @@ def main() -> None:
             "the split was recreated from the saved seed and current data\n"
         )
         output_file.write(
-            "selection_objective: maximize the lower of R2L/U2R validation "
-            "recall, then minimize the recall gap, then maximize their mean\n"
+            "selection_objective: retain validation macro-F1, then maximize "
+            "the lower R2L/U2R recall, their mean, and rare-class F1\n"
         )
         output_file.write(
-            "threshold_rule: divide R2L/U2R scores by their thresholds\n"
+            "min_validation_macro_f1_retention: "
+            f"{args.min_validation_macro_f1_retention}\n"
         )
+        output_file.write(
+            "score_scaling_rule: divide R2L/U2R scores by their "
+            "coefficients before argmax\n"
+        )
+        output_file.write(f"coefficient_min: {args.threshold_min}\n")
+        output_file.write(f"coefficient_max: {args.threshold_max}\n")
+        output_file.write(f"coefficient_step: {args.threshold_step}\n")
+        output_file.write(
+            f"coefficient_pairs_searched: {len(search_frame)}\n"
+        )
+        # Legacy keys kept so older result parsers continue to work.
         output_file.write(f"threshold_min: {args.threshold_min}\n")
         output_file.write(f"threshold_max: {args.threshold_max}\n")
         output_file.write(f"threshold_step: {args.threshold_step}\n")
         output_file.write(f"threshold_pairs_searched: {len(search_frame)}\n")
+        output_file.write(
+            f"r2l_score_coefficient: {r2l_threshold}\n"
+        )
+        output_file.write(
+            f"u2r_score_coefficient: {u2r_threshold}\n"
+        )
         output_file.write(f"r2l_threshold: {r2l_threshold}\n")
         output_file.write(f"u2r_threshold: {u2r_threshold}\n\n")
         for line in format_metric_lines("Raw Validation", raw_val_metrics):
@@ -764,9 +749,9 @@ def main() -> None:
         output_file.write(tuned_report)
         output_file.write("\n")
 
-    print("\n=== Selected decision thresholds ===")
-    print(f"R2L threshold: {r2l_threshold:.4f}")
-    print(f"U2R threshold: {u2r_threshold:.4f}")
+    print("\n=== Selected score coefficients ===")
+    print(f"R2L coefficient: {r2l_threshold:.4f}")
+    print(f"U2R coefficient: {u2r_threshold:.4f}")
     print(
         "Validation weaker-minority recall: "
         f"raw={raw_val_metrics['minimum_minority_recall']:.4f}, "
