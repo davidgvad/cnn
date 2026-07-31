@@ -682,7 +682,12 @@ def save_training_plot(history: tf.keras.callbacks.History, out_dir: Path, prefi
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="NSL-KDD 5-class: optimized feature layout + CTGAN + focal.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "NSL-KDD 5-class: optimized feature layout with configurable "
+            "loss, CTGAN augmentation, batching, and score scaling."
+        )
+    )
 
     parser.add_argument("--run-name", type=str, default="opt", help="Prefix for outputs in results/ and model/.")
 
@@ -698,7 +703,17 @@ def main() -> None:
         help="Guaranteed R2L and U2R samples per training batch. Use 0 for ordinary batching.",
     )
 
-    # Focal (best sweep defaults)
+    # Loss (best sweep defaults)
+    parser.add_argument(
+        "--loss-mode",
+        choices=["cross_entropy", "class_balanced_focal"],
+        default="class_balanced_focal",
+        help=(
+            "cross_entropy: ordinary sparse categorical cross-entropy; "
+            "class_balanced_focal: effective-number class weights with the "
+            "configured focal gamma."
+        ),
+    )
     parser.add_argument("--focal-gamma", type=float, default=1.5)
     parser.add_argument("--cb-beta", type=float, default=0.9999)
 
@@ -797,6 +812,19 @@ def main() -> None:
     args = parser.parse_args()
     if args.minority_per_batch < 0:
         parser.error("--minority-per-batch must be 0 or greater.")
+    if not np.isfinite(args.focal_gamma) or args.focal_gamma < 0.0:
+        parser.error("--focal-gamma must be finite and 0 or greater.")
+    if (
+        args.loss_mode == "class_balanced_focal"
+        and (
+            not np.isfinite(args.cb_beta)
+            or not 0.0 < args.cb_beta < 1.0
+        )
+    ):
+        parser.error(
+            "--cb-beta must be finite and between 0 and 1 for "
+            "class_balanced_focal."
+        )
     for option_name, target in [
         ("--target-dos", args.target_dos),
         ("--target-probe", args.target_probe),
@@ -1055,9 +1083,23 @@ def main() -> None:
     y_tr = y_tr[train_order]
     real_validation_counts = np.bincount(y_val, minlength=5)
 
-    # Focal alpha on training split
-    alpha, alpha_counts = compute_cb_alpha_effective_number(y_tr, beta=args.cb_beta, num_classes=5)
-    loss_obj = ClassBalancedFocalLoss(alpha=alpha, gamma=args.focal_gamma)
+    # Loss weights are always derived from the exact training split. Plain
+    # cross-entropy deliberately ignores beta/gamma for the controlled
+    # baseline and CTGAN-only ablations.
+    alpha_counts = np.bincount(y_tr, minlength=5)
+    if args.loss_mode == "class_balanced_focal":
+        alpha, alpha_counts = compute_cb_alpha_effective_number(
+            y_tr,
+            beta=args.cb_beta,
+            num_classes=5,
+        )
+        loss_obj: tf.keras.losses.Loss = ClassBalancedFocalLoss(
+            alpha=alpha,
+            gamma=args.focal_gamma,
+        )
+    else:
+        alpha = np.ones(5, dtype=np.float32)
+        loss_obj = tf.keras.losses.SparseCategoricalCrossentropy()
 
     model = build_opt_cnn(
         loss=loss_obj,
@@ -1316,7 +1358,9 @@ def main() -> None:
 
     out_txt = paths.results_dir / f"{prefix}_results.txt"
     with out_txt.open("w", encoding="utf-8") as f:
-        f.write("CNN_OPT (Optimized feature layout + CTGAN + Focal)\n\n")
+        f.write(
+            "CNN_OPT (controlled optimized Conv2D pipeline)\n\n"
+        )
         f.write(f"run_name: {prefix}\n")
         f.write(f"seed: {args.seed}\n")
         f.write(f"epochs: {args.epochs}\n")
@@ -1334,6 +1378,7 @@ def main() -> None:
         f.write(f"aug_counts: {aug_counts.tolist()}\n\n")
         f.write(f"training_counts: {training_counts.tolist()}\n")
         f.write(f"r2l_synthetic_rows_used: {int(synth_counts[2])}\n\n")
+        f.write(f"loss_mode: {args.loss_mode}\n")
         f.write(f"focal_gamma: {args.focal_gamma}\n")
         f.write(f"cb_beta: {args.cb_beta}\n")
         f.write(f"minority_per_batch: {args.minority_per_batch}\n")
