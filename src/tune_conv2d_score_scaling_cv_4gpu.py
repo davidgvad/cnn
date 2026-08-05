@@ -1116,6 +1116,8 @@ def validate_arguments(
 def main(
     default_architecture: str = "conv2d",
     default_training_mode: str = "focal_balanced",
+    default_coefficient_values: Sequence[float] | None = None,
+    default_name_prefix: str | None = None,
 ) -> None:
     if default_architecture not in ARCHITECTURE_DEFAULTS:
         raise ValueError(f"Unsupported default architecture: {default_architecture}")
@@ -1137,19 +1139,31 @@ def main(
     if args.focal_gamma is None:
         args.focal_gamma = float(architecture_defaults["focal_gamma"])
     if args.coefficient_values is None:
-        args.coefficient_values = (
-            [1.0]
-            if args.training_mode == "baseline_ce"
-            else list(DEFAULT_COEFFICIENTS)
-        )
+        if default_coefficient_values is not None:
+            args.coefficient_values = [
+                float(value) for value in default_coefficient_values
+            ]
+        else:
+            args.coefficient_values = (
+                [1.0]
+                if args.training_mode == "baseline_ce"
+                else list(DEFAULT_COEFFICIENTS)
+            )
     if args.name_prefix is None:
-        prefix_key = (
-            "baseline_name_prefix"
-            if args.training_mode == "baseline_ce"
-            else "name_prefix"
-        )
-        args.name_prefix = str(architecture_defaults[prefix_key])
+        if default_name_prefix is not None:
+            args.name_prefix = str(default_name_prefix)
+        else:
+            prefix_key = (
+                "baseline_name_prefix"
+                if args.training_mode == "baseline_ce"
+                else "name_prefix"
+            )
+            args.name_prefix = str(architecture_defaults[prefix_key])
     validate_arguments(parser, args)
+    raw_argmax_only = (
+        len(args.coefficient_values) == 1
+        and np.isclose(float(args.coefficient_values[0]), 1.0)
+    )
 
     if args.worker_mode == "train":
         required = {
@@ -1294,7 +1308,7 @@ def main(
         "pairs_excluded_by_retention": False,
         "ranking": (
             "not applicable; evaluate the single raw-argmax policy (1,1)"
-            if args.training_mode == "baseline_ce"
+            if raw_argmax_only
             else (
                 "rank every pair without exclusion; maximize mean Rare Macro-F1; "
                 "then mean Macro-F1; then prefer multiplicative closeness to (1,1); "
@@ -1371,6 +1385,8 @@ def main(
 
     if args.training_mode == "baseline_ce":
         print(f"{model_label} pure cross-entropy baseline OOF evaluation")
+    elif raw_argmax_only:
+        print(f"{model_label} focal-loss + minority-batch OOF evaluation")
     else:
         print(f"{model_label} balanced-batch + score-scaling OOF search")
     print(f"Training key: {training_key}")
@@ -1391,16 +1407,20 @@ def main(
             f"Guaranteed per batch: {args.minority_per_batch} R2L + "
             f"{args.minority_per_batch} U2R"
         )
-        print(f"Coefficient values ({len(coefficients)}): {coefficients}")
-        print(f"Offline coefficient pairs: {len(coefficients) ** 2}")
-        print(
-            "Diagnostic Macro-F1 retention marker: "
-            f"{args.macro_f1_retention:.0%} (does not exclude pairs)"
-        )
-        print(
-            "Diagnostic minority-precision retention marker: "
-            f"{args.minority_precision_retention:.0%} (does not exclude pairs)"
-        )
+        if raw_argmax_only:
+            print("Decision policy: raw multiclass argmax")
+            print("Score scaling: NO; CTGAN: NO")
+        else:
+            print(f"Coefficient values ({len(coefficients)}): {coefficients}")
+            print(f"Offline coefficient pairs: {len(coefficients) ** 2}")
+            print(
+                "Diagnostic Macro-F1 retention marker: "
+                f"{args.macro_f1_retention:.0%} (does not exclude pairs)"
+            )
+            print(
+                "Diagnostic minority-precision retention marker: "
+                f"{args.minority_precision_retention:.0%} (does not exclude pairs)"
+            )
     print("KDDTest+ accessed: NO")
 
     if args.dry_run:
@@ -1455,8 +1475,13 @@ def main(
             f"{model_label} pure cross-entropy baseline OOF evaluation"
             if args.training_mode == "baseline_ce"
             else (
-                f"{model_label} minority-guaranteed batching and "
-                "score-scaling OOF search"
+                f"{model_label} focal-loss and minority-guaranteed-batch "
+                "raw-argmax OOF evaluation"
+                if raw_argmax_only
+                else (
+                    f"{model_label} minority-guaranteed batching and "
+                    "score-scaling OOF search"
+                )
             )
         ),
         "training_settings": training_settings,
@@ -1489,7 +1514,7 @@ def main(
         ),
         "score_scaling_semantics": (
             "not used; raw multiclass argmax"
-            if args.training_mode == "baseline_ce"
+            if raw_argmax_only
             else (
                 "divide R2L and U2R probability scores by their positive "
                 "coefficients before multiclass argmax; below one promotes, "
@@ -1498,7 +1523,7 @@ def main(
         ),
         "selection_protocol": (
             "none; report the single raw-argmax policy across seeds"
-            if args.training_mode == "baseline_ce"
+            if raw_argmax_only
             else (
                 "evaluate each pair separately per seed; average metrics across "
                 "seeds; exclude no pair; retain Macro-F1 and per-class "
@@ -1511,8 +1536,13 @@ def main(
             "use the unchanged architecture and raw argmax for later KDDTest+ evaluation"
             if args.training_mode == "baseline_ce"
             else (
-                "freeze beta, gamma, batching, and score pair before KDDTest+ "
-                "evaluation"
+                "freeze beta, gamma, and minority-guaranteed batching; retain raw "
+                "argmax before later KDDTest+ evaluation"
+                if raw_argmax_only
+                else (
+                    "freeze beta, gamma, batching, and score pair before KDDTest+ "
+                    "evaluation"
+                )
             )
         ),
     }
@@ -1658,7 +1688,7 @@ def main(
         fold_ids,
         oof_dir,
     )
-    if args.training_mode == "baseline_ce":
+    if raw_argmax_only:
         print("Training complete. Aggregating raw-argmax OOF metrics...")
     else:
         print("Training complete. Evaluating coefficient pairs without retraining...")
@@ -1681,11 +1711,15 @@ def main(
     best_path = results_dir / (
         f"{scoring_stem}_baseline_summary.json"
         if args.training_mode == "baseline_ce"
-        else f"{scoring_stem}_best_scaling.json"
+        else (
+            f"{scoring_stem}_focal_batch_summary.json"
+            if raw_argmax_only
+            else f"{scoring_stem}_best_scaling.json"
+        )
     )
     comparison_path = results_dir / (
         f"{scoring_stem}_raw_argmax.csv"
-        if args.training_mode == "baseline_ce"
+        if raw_argmax_only
         else f"{scoring_stem}_raw_vs_selected.csv"
     )
     latest_path = results_dir / f"{prefix}_latest.json"
@@ -1703,7 +1737,7 @@ def main(
     comparison_rows: List[Dict[str, Any]] = []
     policies = (
         [("raw_argmax", raw_row)]
-        if args.training_mode == "baseline_ce"
+        if raw_argmax_only
         else [("raw_argmax", raw_row), ("selected_scaling", selected_row)]
     )
     for policy, row in policies:
@@ -1770,6 +1804,20 @@ def main(
             + pretty.to_string(index=False)
             + "\n"
         )
+    elif raw_argmax_only:
+        readable_text = (
+            f"{model_label} focal-loss + minority-guaranteed-batch OOF evaluation\n"
+            f"Training key: {training_key}\n"
+            f"Scoring key: {scoring_key}\n"
+            f"Focal settings: beta={args.cb_beta}, gamma={args.focal_gamma}\n"
+            f"Seeds: {args.seeds}; folds: {FOLD_COUNT}\n"
+            f"Guaranteed per batch: {args.minority_per_batch} R2L + "
+            f"{args.minority_per_batch} U2R\n"
+            "Decision: raw argmax; CTGAN: NO; score scaling: NO\n"
+            "KDDTest+ accessed: NO\n\n"
+            + pretty.to_string(index=False)
+            + "\n"
+        )
     else:
         readable_text = (
             f"{model_label} balanced-batch score-scaling search\n"
@@ -1808,6 +1856,12 @@ def main(
 
     if args.training_mode == "baseline_ce":
         print(f"\n=== {model_label} pure baseline OOF results ===")
+        print(pretty.to_string(index=False))
+        print(f"Per-seed raw metrics: {raw_seed_path}")
+        print(f"Numeric mean/std summary: {ranking_path}")
+        print(f"Readable summary: {readable_path}")
+    elif raw_argmax_only:
+        print(f"\n=== {model_label} focal + minority-batch OOF results ===")
         print(pretty.to_string(index=False))
         print(f"Per-seed raw metrics: {raw_seed_path}")
         print(f"Numeric mean/std summary: {ranking_path}")
