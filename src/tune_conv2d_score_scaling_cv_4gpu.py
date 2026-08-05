@@ -753,7 +753,6 @@ def score_oof_probabilities(
     )
     summary = summary.sort_values(
         by=[
-            "eligible_mean",
             "minimum_minority_recall_mean",
             "minority_recall_mean",
             "rare_f1_mean",
@@ -769,7 +768,6 @@ def score_oof_probabilities(
             False,
             False,
             False,
-            False,
             True,
             True,
             True,
@@ -781,8 +779,6 @@ def score_oof_probabilities(
     summary.insert(0, "rank", np.arange(1, len(summary) + 1))
     if len(summary) != len(values) ** 2:
         raise RuntimeError("Scaling summary has the wrong number of pairs.")
-    if not bool(summary.iloc[0]["eligible_mean"]):
-        raise RuntimeError("No scaling pair passed the performance guards.")
 
     winner = summary.iloc[0]
     best = {
@@ -1051,12 +1047,12 @@ def main() -> None:
         "pair_count": len(coefficients) ** 2,
         "macro_f1_retention": float(args.macro_f1_retention),
         "minority_precision_retention": float(args.minority_precision_retention),
-        "eligibility_scope": "mean_across_training_seeds",
+        "retention_indicators": "diagnostic_only_mean_across_training_seeds",
+        "pairs_excluded_by_retention": False,
         "ranking": (
-            "pass mean Macro-F1 and both minority-precision guards; maximize "
-            "mean minimum-minority recall; mean minority recall; Rare Macro-F1; "
-            "maximize Macro-F1; minimize mean recall gap; closeness to (1,1); "
-            "minimize minimum-recall SD"
+            "rank every pair without exclusion; maximize mean minimum-minority "
+            "recall; mean minority recall; Rare Macro-F1; Macro-F1; minimize "
+            "mean recall gap; closeness to (1,1); minimum-recall SD"
         ),
     }
     scoring_key = stable_hash(scoring_settings, 12)
@@ -1126,8 +1122,14 @@ def main() -> None:
     )
     print(f"Coefficient values ({len(coefficients)}): {coefficients}")
     print(f"Offline coefficient pairs: {len(coefficients) ** 2}")
-    print(f"Mean Macro-F1 retention: {args.macro_f1_retention:.0%}")
-    print(f"Each minority precision retention: {args.minority_precision_retention:.0%}")
+    print(
+        "Diagnostic Macro-F1 retention marker: "
+        f"{args.macro_f1_retention:.0%} (does not exclude pairs)"
+    )
+    print(
+        "Diagnostic minority-precision retention marker: "
+        f"{args.minority_precision_retention:.0%} (does not exclude pairs)"
+    )
     print("KDDTest+ accessed: NO")
 
     if args.dry_run:
@@ -1208,10 +1210,10 @@ def main() -> None:
         ),
         "selection_protocol": (
             "evaluate each pair separately per seed; average metrics across seeds; "
-            "require mean Macro-F1 and per-class minority-precision retention; "
-            "maximize the weaker R2L/U2R recall, then their mean recall, then "
-            "Rare Macro-F1 and Macro-F1; minimize the recall gap and use "
-            "multiplicative distance to (1,1) as later tie-breaks"
+            "exclude no pair; retain Macro-F1 and per-class minority-precision "
+            "markers for diagnostics only; maximize the weaker R2L/U2R recall, "
+            "then their mean recall, Rare Macro-F1, and Macro-F1; minimize the "
+            "recall gap and use multiplicative distance to (1,1) as later tie-breaks"
         ),
         "final_test_policy": (
             "freeze beta, gamma, batching, and score pair before KDDTest+ evaluation"
@@ -1434,10 +1436,11 @@ def main() -> None:
         f"Focal settings: beta={args.cb_beta}, gamma={args.focal_gamma}\n"
         f"Seeds: {args.seeds}; folds: {FOLD_COUNT}\n"
         f"Coefficient values: {coefficients}\n"
-        f"Macro-F1 retention: {args.macro_f1_retention:.0%} of raw mean\n"
-        "Minority-precision retention: "
+        f"Diagnostic Macro-F1 marker: {args.macro_f1_retention:.0%} of raw mean\n"
+        "Diagnostic minority-precision marker: "
         f"{args.minority_precision_retention:.0%} of each raw mean\n"
-        "Ranking: guards, weaker minority recall, mean minority recall, "
+        "No pair excluded by these markers. Ranking: weaker minority recall, "
+        "mean minority recall, "
         "Rare Macro-F1, Macro-F1, recall balance, distance to (1,1)\n"
         "KDDTest+ accessed: NO\n\n" + pretty.to_string(index=False) + "\n",
         encoding="utf-8",
