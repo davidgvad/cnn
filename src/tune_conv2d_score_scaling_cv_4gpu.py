@@ -38,6 +38,7 @@ import pandas as pd
 import run_no_ctgan_model_ablation_4gpu as core
 import tune_conv1d_focal_cv_4gpu as conv1d_stage1
 import tune_conv2d_focal_cv_4gpu as conv2d_stage1
+import tune_mlp_focal_cv_4gpu as mlp_stage1
 import tune_transformer_focal_cv_4gpu as transformer_stage1
 
 
@@ -76,6 +77,12 @@ ARCHITECTURE_DEFAULTS = {
         "focal_gamma": DEFAULT_FOCAL_GAMMA,
         "name_prefix": "conv2d_balanced_score_scaling",
         "stage1": conv2d_stage1,
+    },
+    "mlp": {
+        "label": "MLP",
+        "focal_gamma": 0.25,
+        "name_prefix": "mlp_balanced_score_scaling",
+        "stage1": mlp_stage1,
     },
     "transformer": {
         "label": "Transformer",
@@ -191,6 +198,8 @@ def run_training_worker(args: argparse.Namespace) -> None:
         from cnn_opt_1d_4gpu import build_opt_cnn_1d as build_model  # type: ignore
     elif args.architecture == "conv2d":
         from cnn_opt import build_opt_cnn as build_model  # type: ignore
+    elif args.architecture == "mlp":
+        from cnn_opt_1d_4gpu import build_opt_mlp as build_model  # type: ignore
     else:
         from cnn_opt_1d_4gpu import (  # type: ignore
             build_vanilla_transformer as build_model,
@@ -245,7 +254,15 @@ def run_training_worker(args: argparse.Namespace) -> None:
         num_classes=5,
     )
     loss = ClassBalancedFocalLoss(alpha=alpha, gamma=float(args.focal_gamma))
-    if args.architecture == "transformer":
+    if args.architecture == "mlp":
+        model = build_model(
+            loss=loss,
+            dense_units=FIXED_BACKBONE["dense_units"],
+            dropout1=FIXED_BACKBONE["dropout1"],
+            dropout2=FIXED_BACKBONE["dropout2"],
+            use_batch_norm=FIXED_BACKBONE["batch_norm"],
+        )
+    elif args.architecture == "transformer":
         model = build_model(
             loss=loss,
             d_model=FIXED_BACKBONE["d_model"],
@@ -274,7 +291,10 @@ def run_training_worker(args: argparse.Namespace) -> None:
             f"{FIXED_BACKBONE['expected_parameters']}, got {parameter_count}."
         )
 
-    if args.architecture == "conv2d":
+    if args.architecture == "mlp":
+        X_train = X_train_flat
+        X_validation = X_validation_flat
+    elif args.architecture == "conv2d":
         X_train = X_train_flat.reshape(-1, 11, 11, 1)
         X_validation = X_validation_flat.reshape(-1, 11, 11, 1)
     else:
@@ -1010,8 +1030,8 @@ def main(default_architecture: str = "conv2d") -> None:
     script_path = Path(__file__).resolve()
     parser = argparse.ArgumentParser(
         description=(
-            "Train balanced-batch Conv1D, Conv2D, or Transformer OOF models and "
-            "tune rare-class score scaling without KDDTest+."
+            "Train balanced-batch MLP, Conv1D, Conv2D, or Transformer OOF models "
+            "and tune rare-class score scaling without KDDTest+."
         )
     )
     add_arguments(parser, default_architecture)
@@ -1059,7 +1079,7 @@ def main(default_architecture: str = "conv2d") -> None:
         repo_root / "src" / "cnn_opt.py",
         repo_root / "src" / "cnn_gan_foc.py",
     ]
-    if args.architecture in {"conv1d", "transformer"}:
+    if args.architecture in {"conv1d", "mlp", "transformer"}:
         training_dependency_paths.append(repo_root / "src" / "cnn_opt_1d_4gpu.py")
     required_paths = [script_path, *training_dependency_paths]
     missing_paths = [str(path) for path in required_paths if not path.is_file()]
@@ -1081,9 +1101,13 @@ def main(default_architecture: str = "conv2d") -> None:
         "architecture": args.architecture,
         "backbone": FIXED_BACKBONE,
         "input_representation": (
-            "121 semantically ordered features, shape (11, 11, 1)"
-            if args.architecture == "conv2d"
-            else "121 semantically ordered features, shape (121, 1)"
+            "121 semantically ordered features, shape (121,)"
+            if args.architecture == "mlp"
+            else (
+                "121 semantically ordered features, shape (11, 11, 1)"
+                if args.architecture == "conv2d"
+                else "121 semantically ordered features, shape (121, 1)"
+            )
         ),
         "cb_beta": float(args.cb_beta),
         "focal_gamma": float(args.focal_gamma),
