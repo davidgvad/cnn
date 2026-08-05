@@ -5,10 +5,16 @@ the earlier KDDTrain+ cross-validation experiments.  For every architecture and
 seed, the script trains once on all of KDDTrain+ and evaluates once on untouched
 KDDTest+.  It does not tune, checkpoint, or select anything using KDDTest+.
 
-Compared variants
------------------
+Supported variants
+------------------
 baseline
     Cross-entropy, ordinary shuffled mini-batches, raw multiclass argmax.
+focal_only
+    Class-balanced focal loss, ordinary shuffled mini-batches, raw argmax.
+batch_only
+    Cross-entropy, minority-guaranteed mini-batches, raw argmax.
+scaling_only
+    Cross-entropy, ordinary shuffled mini-batches, frozen score scaling.
 full
     Class-balanced focal loss, one guaranteed R2L and U2R example per batch,
     and the architecture-specific frozen class-score coefficients.
@@ -42,7 +48,24 @@ import run_no_ctgan_model_ablation_4gpu as core
 SCHEMA_VERSION = 1
 DEFAULT_ARCHITECTURES = ["conv2d", "conv1d", "transformer", "mlp"]
 DEFAULT_SEEDS = [0, 1, 2]
-VARIANTS = ["baseline", "full"]
+DEFAULT_VARIANTS = ["baseline", "full"]
+SUPPORTED_VARIANTS = [
+    "baseline",
+    "focal_only",
+    "batch_only",
+    "scaling_only",
+    "full",
+]
+FOCAL_VARIANTS = {"focal_only", "full"}
+MINORITY_BATCH_VARIANTS = {"batch_only", "full"}
+SCORE_SCALING_VARIANTS = {"scaling_only", "full"}
+VARIANT_LABELS = {
+    "baseline": "Baseline",
+    "focal_only": "Baseline + focal loss",
+    "batch_only": "Baseline + minority batching",
+    "scaling_only": "Baseline + frozen scaling",
+    "full": "Focal + batching + scaling",
+}
 METRICS = list(core.METRICS)
 
 # These values were selected on KDDTrain+ validation predictions and are now
@@ -328,11 +351,7 @@ def run_worker(args: argparse.Namespace) -> None:
     tf.keras.utils.set_random_seed(seed)
     np.random.seed(seed)
 
-    if variant == "baseline":
-        loss: Any = tf.keras.losses.SparseCategoricalCrossentropy()
-        alpha = None
-        alpha_counts = np.bincount(y_train, minlength=5).astype(np.int64)
-    elif variant == "full":
+    if variant in FOCAL_VARIANTS:
         alpha, alpha_counts = core.effective_number_alpha(
             y_train,
             beta=float(frozen["beta"]),
@@ -342,6 +361,10 @@ def run_worker(args: argparse.Namespace) -> None:
             alpha=alpha,
             gamma=float(frozen["focal_gamma"]),
         )
+    elif variant in SUPPORTED_VARIANTS:
+        loss = tf.keras.losses.SparseCategoricalCrossentropy()
+        alpha = None
+        alpha_counts = np.bincount(y_train, minlength=5).astype(np.int64)
     else:
         raise ValueError(f"Unsupported variant: {variant}")
 
@@ -357,7 +380,7 @@ def run_worker(args: argparse.Namespace) -> None:
     X_train = reshape_features(X_train_flat, architecture)
     X_test = reshape_features(X_test_flat, architecture)
     started = time.perf_counter()
-    if variant == "full":
+    if variant in MINORITY_BATCH_VARIANTS:
         batches = BalancedBatchSequence(
             X_train,
             y_train,
@@ -390,7 +413,7 @@ def run_worker(args: argparse.Namespace) -> None:
         raise RuntimeError("KDDTest+ probabilities contain a non-finite value.")
 
     raw_predictions = np.argmax(probabilities, axis=1).astype(np.int64)
-    if variant == "full":
+    if variant in SCORE_SCALING_VARIANTS:
         predictions = core.apply_class_score_scaling(
             probabilities,
             {
@@ -419,38 +442,52 @@ def run_worker(args: argparse.Namespace) -> None:
         "architecture": architecture,
         "architecture_label": frozen["label"],
         "variant": variant,
-        "variant_label": "Baseline" if variant == "baseline" else "Fully equipped",
+        "variant_label": VARIANT_LABELS[variant],
         "seed": seed,
         "model_parameters": model_parameters,
         "backbone": frozen["backbone"],
         "loss": (
-            "sparse_categorical_crossentropy"
-            if variant == "baseline"
-            else "class_balanced_focal"
+            "class_balanced_focal"
+            if variant in FOCAL_VARIANTS
+            else "sparse_categorical_crossentropy"
         ),
-        "cb_beta": float(frozen["beta"]) if variant == "full" else None,
-        "focal_gamma": float(frozen["focal_gamma"]) if variant == "full" else None,
+        "cb_beta": float(frozen["beta"]) if variant in FOCAL_VARIANTS else None,
+        "focal_gamma": (
+            float(frozen["focal_gamma"]) if variant in FOCAL_VARIANTS else None
+        ),
         "alpha": np.asarray(alpha, dtype=float).tolist() if alpha is not None else None,
         "alpha_counts": np.asarray(alpha_counts, dtype=int).tolist(),
         "batching": (
-            "ordinary_shuffled"
-            if variant == "baseline"
-            else "minority_guaranteed_with_replacement"
+            "minority_guaranteed_with_replacement"
+            if variant in MINORITY_BATCH_VARIANTS
+            else "ordinary_shuffled"
         ),
         "minority_per_batch_per_class": (
-            int(args.minority_per_batch) if variant == "full" else 0
+            int(args.minority_per_batch)
+            if variant in MINORITY_BATCH_VARIANTS
+            else 0
         ),
-        "score_scaling_used": variant == "full",
+        "score_scaling_used": variant in SCORE_SCALING_VARIANTS,
         "score_scaling_operation": (
-            "class_score_divided_by_coefficient" if variant == "full" else None
+            "class_score_divided_by_coefficient"
+            if variant in SCORE_SCALING_VARIANTS
+            else None
         ),
         "r2l_score_coefficient": (
-            float(frozen["r2l_score_coefficient"]) if variant == "full" else 1.0
+            float(frozen["r2l_score_coefficient"])
+            if variant in SCORE_SCALING_VARIANTS
+            else 1.0
         ),
         "u2r_score_coefficient": (
-            float(frozen["u2r_score_coefficient"]) if variant == "full" else 1.0
+            float(frozen["u2r_score_coefficient"])
+            if variant in SCORE_SCALING_VARIANTS
+            else 1.0
         ),
-        "decision_policy": "raw_argmax" if variant == "baseline" else "frozen_score_scaling_then_argmax",
+        "decision_policy": (
+            "frozen_score_scaling_then_argmax"
+            if variant in SCORE_SCALING_VARIANTS
+            else "raw_argmax"
+        ),
         "epochs_requested": int(args.epochs),
         "epochs_completed": len(history.history.get("loss", [])),
         "batch_size": int(args.batch_size),
@@ -565,6 +602,7 @@ def aggregate_results(
     plans: Sequence[Dict[str, Any]],
     results_dir: Path,
     experiment_key: str,
+    output_stem: str,
 ) -> Dict[str, str]:
     rows: List[Dict[str, Any]] = []
     for plan in plans:
@@ -614,7 +652,7 @@ def aggregate_results(
         summary_rows.append(summary)
     summary_frame = pd.DataFrame(summary_rows)
     architecture_order = {name: index for index, name in enumerate(DEFAULT_ARCHITECTURES)}
-    variant_order = {name: index for index, name in enumerate(VARIANTS)}
+    variant_order = {name: index for index, name in enumerate(SUPPORTED_VARIANTS)}
     summary_frame["_architecture_order"] = summary_frame["architecture"].map(architecture_order)
     summary_frame["_variant_order"] = summary_frame["variant"].map(variant_order)
     summary_frame = summary_frame.sort_values(
@@ -649,7 +687,13 @@ def aggregate_results(
                     full.loc[seed, metric] - baseline.loc[seed, metric]
                 )
             delta_rows.append(row)
-    delta_frame = pd.DataFrame(delta_rows)
+    delta_columns = [
+        "architecture",
+        "model",
+        "seed",
+        *[f"{metric}_delta_full_minus_baseline" for metric in METRICS],
+    ]
+    delta_frame = pd.DataFrame(delta_rows, columns=delta_columns)
     delta_summary_rows: List[Dict[str, Any]] = []
     for architecture, group in delta_frame.groupby("architecture", sort=False):
         row = {
@@ -662,9 +706,22 @@ def aggregate_results(
             row[f"{metric}_delta_mean"] = float(group[column].mean())
             row[f"{metric}_delta_std"] = float(group[column].std(ddof=1))
         delta_summary_rows.append(row)
-    delta_summary_frame = pd.DataFrame(delta_summary_rows)
+    delta_summary_columns = [
+        "architecture",
+        "model",
+        "paired_seeds",
+        *[
+            name
+            for metric in METRICS
+            for name in (f"{metric}_delta_mean", f"{metric}_delta_std")
+        ],
+    ]
+    delta_summary_frame = pd.DataFrame(
+        delta_summary_rows,
+        columns=delta_summary_columns,
+    )
 
-    prefix = results_dir / f"final_baseline_vs_full_kddtest_{experiment_key}"
+    prefix = results_dir / f"{output_stem}_{experiment_key}"
     paths = {
         "all_runs": str(prefix.with_name(f"{prefix.name}_all_runs.csv")),
         "summary": str(prefix.with_name(f"{prefix.name}_summary.csv")),
@@ -689,7 +746,7 @@ def aggregate_results(
         "u2r_precision",
         "u2r_recall",
     ]
-    print("\n=== Final KDDTest+ baseline versus fully equipped models ===")
+    print("\n=== Final KDDTest+ neural-configuration results ===")
     print(
         formatted[["model", "configuration", "runs", *display_metrics]].to_string(
             index=False
@@ -701,6 +758,13 @@ def aggregate_results(
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--architectures", nargs="+", choices=DEFAULT_ARCHITECTURES, default=DEFAULT_ARCHITECTURES)
+    parser.add_argument(
+        "--variants",
+        nargs="+",
+        choices=SUPPORTED_VARIANTS,
+        default=DEFAULT_VARIANTS,
+        help="Final fixed configurations to train and evaluate.",
+    )
     parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
     parser.add_argument("--gpus", nargs="+", default=["0", "1", "2", "3"])
     parser.add_argument("--epochs", type=int, default=25)
@@ -717,7 +781,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--experiment-key", default="", help=argparse.SUPPRESS)
     parser.add_argument("--worker-architecture", choices=DEFAULT_ARCHITECTURES, help=argparse.SUPPRESS)
-    parser.add_argument("--worker-variant", choices=VARIANTS, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-variant", choices=SUPPORTED_VARIANTS, help=argparse.SUPPRESS)
     parser.add_argument("--worker-seed", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--worker-run-name", help=argparse.SUPPRESS)
     parser.add_argument("--worker-cache-path", help=argparse.SUPPRESS)
@@ -761,6 +825,7 @@ def main() -> None:
     results_dir = (args.results_dir or (repo_root / "results")).resolve()
     results_dir.mkdir(parents=True, exist_ok=True)
     architectures = list(dict.fromkeys(args.architectures))
+    variants = list(dict.fromkeys(args.variants))
     seeds = list(dict.fromkeys(int(seed) for seed in args.seeds))
     gpus = list(dict.fromkeys(str(gpu) for gpu in args.gpus))
     if args.allow_cpu and not gpus:
@@ -768,9 +833,9 @@ def main() -> None:
 
     protocol = {
         "schema_version": SCHEMA_VERSION,
-        "purpose": "final baseline versus full comparison on KDDTest+",
+        "purpose": "final frozen neural-configuration evaluation on KDDTest+",
         "architectures": architectures,
-        "variants": VARIANTS,
+        "variants": variants,
         "seeds": seeds,
         "epochs": int(args.epochs),
         "batch_size": int(args.batch_size),
@@ -786,7 +851,13 @@ def main() -> None:
     }
     experiment_key = stable_hash(protocol)
     protocol["experiment_key"] = experiment_key
-    prefix = f"final_baseline_vs_full_kddtest_{experiment_key}"
+    if variants == DEFAULT_VARIANTS:
+        output_stem = "final_baseline_vs_full_kddtest"
+    elif variants == ["focal_only", "batch_only", "scaling_only"]:
+        output_stem = "final_single_enhancement_kddtest"
+    else:
+        output_stem = "final_neural_variants_kddtest"
+    prefix = f"{output_stem}_{experiment_key}"
     protocol_path = results_dir / f"{prefix}_protocol.json"
     plan_path = results_dir / f"{prefix}_plan.csv"
     cache_path = results_dir / f"{prefix}_feature_cache.npz"
@@ -798,7 +869,7 @@ def main() -> None:
     plans: List[Dict[str, Any]] = []
     for seed in seeds:
         for architecture in architectures:
-            for variant in VARIANTS:
+            for variant in variants:
                 run_name = f"{prefix}_{architecture}_{variant}_s{seed}"
                 plans.append(
                     {
@@ -818,15 +889,34 @@ def main() -> None:
                     }
                 )
 
-    print("Final KDDTest+ baseline versus fully equipped comparison", flush=True)
+    print("Final frozen neural-configuration evaluation on KDDTest+", flush=True)
     print(f"Experiment key: {experiment_key}", flush=True)
     print(f"Architectures: {architectures}", flush=True)
+    print(f"Configurations: {[VARIANT_LABELS[name] for name in variants]}", flush=True)
     print(f"Seeds: {seeds}", flush=True)
-    print(f"Fits: {len(plans)} ({len(architectures)} architectures x 2 variants x {len(seeds)} seeds)", flush=True)
+    print(
+        f"Fits: {len(plans)} ({len(architectures)} architectures x "
+        f"{len(variants)} configurations x {len(seeds)} seeds)",
+        flush=True,
+    )
     print(f"GPU workers: {gpus}", flush=True)
     print("Train: all KDDTrain+; final evaluation: untouched KDDTest+", flush=True)
-    print("Baseline: cross-entropy + ordinary batches + raw argmax", flush=True)
-    print("Full: frozen focal loss + minority batches + frozen score scaling", flush=True)
+    for variant in variants:
+        focal = "focal loss" if variant in FOCAL_VARIANTS else "cross-entropy"
+        batching = (
+            "minority batches"
+            if variant in MINORITY_BATCH_VARIANTS
+            else "ordinary batches"
+        )
+        decision = (
+            "frozen score scaling"
+            if variant in SCORE_SCALING_VARIANTS
+            else "raw argmax"
+        )
+        print(
+            f"{VARIANT_LABELS[variant]}: {focal} + {batching} + {decision}",
+            flush=True,
+        )
     print("KDDTest+ is not used for tuning or model selection.", flush=True)
     if args.dry_run:
         print("\nDry run; planned fits:")
@@ -941,8 +1031,13 @@ def main() -> None:
     if incomplete:
         raise RuntimeError(f"Result verification failed for: {incomplete}")
 
-    output_paths = aggregate_results(plans, results_dir, experiment_key)
-    latest_path = results_dir / "final_baseline_vs_full_kddtest_latest.json"
+    output_paths = aggregate_results(
+        plans,
+        results_dir,
+        experiment_key,
+        output_stem,
+    )
+    latest_path = results_dir / f"{output_stem}_latest.json"
     latest = {
         "schema_version": SCHEMA_VERSION,
         "experiment_key": experiment_key,
