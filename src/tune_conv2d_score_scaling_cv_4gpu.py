@@ -1,8 +1,8 @@
-"""Tune Conv2D rare-class score scaling from balanced-batch OOF predictions.
+"""Tune Conv1D or Conv2D rare-class score scaling from balanced-batch OOF predictions.
 
 This is the second and third stage of the controlled imbalance pipeline:
 
-1. Freeze the Stage-1 Conv2D focal settings (beta=0.99, gamma=0.50).
+1. Freeze the architecture's Stage-1 focal settings.
 2. Train one model for each of four fixed folds and three training seeds while
    guaranteeing one R2L and one U2R example in every mini-batch.
 3. Restore the four validation folds to original row order, producing one
@@ -36,7 +36,8 @@ import numpy as np
 import pandas as pd
 
 import run_no_ctgan_model_ablation_4gpu as core
-import tune_conv2d_focal_cv_4gpu as stage1
+import tune_conv1d_focal_cv_4gpu as conv1d_stage1
+import tune_conv2d_focal_cv_4gpu as conv2d_stage1
 
 
 SCHEMA_VERSION = 1
@@ -62,9 +63,40 @@ DEFAULT_COEFFICIENTS = [
     1.75,
     1.90,
 ]
-FIXED_BACKBONE = dict(stage1.FIXED_BACKBONE)
+ARCHITECTURE_DEFAULTS = {
+    "conv1d": {
+        "label": "Conv1D",
+        "focal_gamma": 0.25,
+        "name_prefix": "conv1d_balanced_score_scaling",
+        "stage1": conv1d_stage1,
+    },
+    "conv2d": {
+        "label": "Conv2D",
+        "focal_gamma": DEFAULT_FOCAL_GAMMA,
+        "name_prefix": "conv2d_balanced_score_scaling",
+        "stage1": conv2d_stage1,
+    },
+}
+stage1 = conv2d_stage1
+FIXED_BACKBONE = dict(conv2d_stage1.FIXED_BACKBONE)
 METRICS = list(core.METRICS)
 SCORING_METRICS = [*METRICS, "minority_recall"]
+
+
+def configure_architecture(architecture: str) -> None:
+    """Select the matching Stage-1 helpers and fixed backbone."""
+    global stage1, FIXED_BACKBONE
+    configuration = ARCHITECTURE_DEFAULTS[architecture]
+    stage1 = configuration["stage1"]
+    FIXED_BACKBONE = dict(stage1.FIXED_BACKBONE)
+
+
+def architecture_label(architecture: str) -> str:
+    return str(ARCHITECTURE_DEFAULTS[architecture]["label"])
+
+
+def architecture_model_key(architecture: str) -> str:
+    return f"fixed_{architecture}"
 
 
 def stable_hash(value: Any, length: int = 12) -> str:
@@ -115,7 +147,7 @@ def worker_result_is_complete(
             "fold_id": int(plan["fold_id"]),
             "train_indices_sha256": plan["train_indices_sha256"],
             "validation_indices_sha256": plan["validation_indices_sha256"],
-            "model": "fixed_conv2d",
+            "model": architecture_model_key(str(plan["architecture"])),
             "model_parameters": FIXED_BACKBONE["expected_parameters"],
             "cb_beta": float(plan["cb_beta"]),
             "focal_gamma": float(plan["focal_gamma"]),
@@ -146,7 +178,12 @@ def run_training_worker(args: argparse.Namespace) -> None:
     import tensorflow as tf
 
     from cnn_gan_foc import ClassBalancedFocalLoss  # type: ignore
-    from cnn_opt import BalancedBatchSequence, build_opt_cnn  # type: ignore
+    from cnn_opt import BalancedBatchSequence  # type: ignore
+
+    if args.architecture == "conv1d":
+        from cnn_opt_1d_4gpu import build_opt_cnn_1d as build_model  # type: ignore
+    else:
+        from cnn_opt import build_opt_cnn as build_model  # type: ignore
 
     cache_path = Path(args.worker_cache_path)
     cache_metadata_path = Path(args.worker_cache_metadata_path)
@@ -197,7 +234,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         num_classes=5,
     )
     loss = ClassBalancedFocalLoss(alpha=alpha, gamma=float(args.focal_gamma))
-    model = build_opt_cnn(
+    model = build_model(
         loss=loss,
         groups=FIXED_BACKBONE["groups"],
         base_filters=FIXED_BACKBONE["base_filters"],
@@ -210,12 +247,16 @@ def run_training_worker(args: argparse.Namespace) -> None:
     parameter_count = int(model.count_params())
     if parameter_count != FIXED_BACKBONE["expected_parameters"]:
         raise RuntimeError(
-            "Conv2D parameter count changed: expected "
+            f"{architecture_label(args.architecture)} parameter count changed: expected "
             f"{FIXED_BACKBONE['expected_parameters']}, got {parameter_count}."
         )
 
-    X_train = X_train_flat.reshape(-1, 11, 11, 1)
-    X_validation = X_validation_flat.reshape(-1, 11, 11, 1)
+    if args.architecture == "conv1d":
+        X_train = X_train_flat.reshape(-1, 121, 1)
+        X_validation = X_validation_flat.reshape(-1, 121, 1)
+    else:
+        X_train = X_train_flat.reshape(-1, 11, 11, 1)
+        X_validation = X_validation_flat.reshape(-1, 11, 11, 1)
     training_data = BalancedBatchSequence(
         X_train,
         y_train,
@@ -273,7 +314,8 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "feature_order_sha256": cache_metadata["feature_order_sha256"],
         "scaler_state_sha256": cache_metadata["scaler_state_sha256"],
         "fold_cache_sha256": cache_metadata["cache_sha256"],
-        "model": "fixed_conv2d",
+        "model": architecture_model_key(args.architecture),
+        "architecture": args.architecture,
         "backbone": FIXED_BACKBONE,
         "model_parameters": parameter_count,
         "loss": "class_balanced_focal",
@@ -331,6 +373,8 @@ def build_worker_command(
         sys.executable,
         "-u",
         str(script_path),
+        "--architecture",
+        str(args.architecture),
         "--worker-mode",
         "train",
         "--worker-run-name",
@@ -753,22 +797,16 @@ def score_oof_probabilities(
     )
     summary = summary.sort_values(
         by=[
-            "minimum_minority_recall_mean",
-            "minority_recall_mean",
             "rare_f1_mean",
             "macro_f1_mean",
-            "minority_recall_gap_mean",
             "scaling_log_distance",
-            "minimum_minority_recall_std",
+            "rare_f1_std",
             "r2l_score_coefficient",
             "u2r_score_coefficient",
         ],
         ascending=[
             False,
             False,
-            False,
-            False,
-            True,
             True,
             True,
             True,
@@ -846,12 +884,19 @@ def formatted_summary(summary: pd.DataFrame, top_n: int) -> pd.DataFrame:
     return output
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
+def add_arguments(
+    parser: argparse.ArgumentParser, default_architecture: str = "conv2d"
+) -> None:
+    parser.add_argument(
+        "--architecture",
+        choices=sorted(ARCHITECTURE_DEFAULTS),
+        default=default_architecture,
+    )
     parser.add_argument("--gpus", nargs="+", default=["0", "1", "2", "3"])
     parser.add_argument("--seeds", type=int, nargs="+", default=DEFAULT_SEEDS)
     parser.add_argument("--fold-seed", type=int, default=DEFAULT_FOLD_SEED)
     parser.add_argument("--cb-beta", type=float, default=DEFAULT_BETA)
-    parser.add_argument("--focal-gamma", type=float, default=DEFAULT_FOCAL_GAMMA)
+    parser.add_argument("--focal-gamma", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--minority-per-batch", type=int, default=1)
@@ -872,7 +917,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--score-chunk-size", type=int, default=512)
     parser.add_argument("--top-n", type=int, default=20)
     parser.add_argument("--fit-verbose", type=int, choices=[0, 1, 2], default=2)
-    parser.add_argument("--name-prefix", default="conv2d_balanced_score_scaling")
+    parser.add_argument("--name-prefix", default=None)
     parser.add_argument("--deterministic-ops", action="store_true")
     parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -935,17 +980,25 @@ def validate_arguments(
         parser.error("--name-prefix must be a nonempty filename-safe name.")
 
 
-def main() -> None:
+def main(default_architecture: str = "conv2d") -> None:
+    if default_architecture not in ARCHITECTURE_DEFAULTS:
+        raise ValueError(f"Unsupported default architecture: {default_architecture}")
     repo_root = Path(__file__).resolve().parents[1]
     script_path = Path(__file__).resolve()
     parser = argparse.ArgumentParser(
         description=(
-            "Train balanced-batch Conv2D OOF models and tune rare-class score "
+            "Train balanced-batch Conv1D/Conv2D OOF models and tune rare-class score "
             "scaling without KDDTest+."
         )
     )
-    add_arguments(parser)
+    add_arguments(parser, default_architecture)
     args = parser.parse_args()
+    configure_architecture(args.architecture)
+    architecture_defaults = ARCHITECTURE_DEFAULTS[args.architecture]
+    if args.focal_gamma is None:
+        args.focal_gamma = float(architecture_defaults["focal_gamma"])
+    if args.name_prefix is None:
+        args.name_prefix = str(architecture_defaults["name_prefix"])
     validate_arguments(parser, args)
 
     if args.worker_mode == "train":
@@ -972,15 +1025,19 @@ def main() -> None:
     if len(gpus) > FOLD_COUNT:
         parser.error(f"At most {FOLD_COUNT} GPU workers are supported.")
     cuda_tokens = resolve_cuda_tokens(gpus)
+    model_label = architecture_label(args.architecture)
 
     train_path = repo_root / "data" / "KDDTrain+.txt"
+    stage1_path = repo_root / "src" / f"tune_{args.architecture}_focal_cv_4gpu.py"
     training_dependency_paths = [
         train_path,
-        repo_root / "src" / "tune_conv2d_focal_cv_4gpu.py",
+        stage1_path,
         repo_root / "src" / "run_no_ctgan_model_ablation_4gpu.py",
         repo_root / "src" / "cnn_opt.py",
         repo_root / "src" / "cnn_gan_foc.py",
     ]
+    if args.architecture == "conv1d":
+        training_dependency_paths.append(repo_root / "src" / "cnn_opt_1d_4gpu.py")
     required_paths = [script_path, *training_dependency_paths]
     missing_paths = [str(path) for path in required_paths if not path.is_file()]
     if missing_paths:
@@ -997,8 +1054,14 @@ def main() -> None:
         "pandas": pd.__version__,
     }
     training_settings = {
-        "model": "Conv2D",
+        "model": model_label,
+        "architecture": args.architecture,
         "backbone": FIXED_BACKBONE,
+        "input_representation": (
+            "121 semantically ordered features, shape (121, 1)"
+            if args.architecture == "conv1d"
+            else "121 semantically ordered features, shape (11, 11, 1)"
+        ),
         "cb_beta": float(args.cb_beta),
         "focal_gamma": float(args.focal_gamma),
         "training_seeds": [int(seed) for seed in args.seeds],
@@ -1050,9 +1113,9 @@ def main() -> None:
         "retention_indicators": "diagnostic_only_mean_across_training_seeds",
         "pairs_excluded_by_retention": False,
         "ranking": (
-            "rank every pair without exclusion; maximize mean minimum-minority "
-            "recall; mean minority recall; Rare Macro-F1; Macro-F1; minimize "
-            "mean recall gap; closeness to (1,1); minimum-recall SD"
+            "rank every pair without exclusion; maximize mean Rare Macro-F1; "
+            "then mean Macro-F1; then prefer multiplicative closeness to (1,1); "
+            "then lower Rare Macro-F1 sample SD"
         ),
     }
     scoring_key = stable_hash(scoring_settings, 12)
@@ -1085,6 +1148,7 @@ def main() -> None:
             plans.append(
                 {
                     "training_key": training_key,
+                    "architecture": args.architecture,
                     "seed": int(seed),
                     "fold_id": fold_id,
                     "fold_number": fold_id + 1,
@@ -1108,7 +1172,7 @@ def main() -> None:
     if len(plans) != expected_fits:
         raise RuntimeError("Training plan count is inconsistent.")
 
-    print("Conv2D balanced-batch + score-scaling OOF search")
+    print(f"{model_label} balanced-batch + score-scaling OOF search")
     print(f"Training key: {training_key}")
     print(f"Scoring key: {scoring_key}")
     print(f"GPU workers: {gpus}")
@@ -1180,7 +1244,9 @@ def main() -> None:
         "schema_version": SCHEMA_VERSION,
         "training_key": training_key,
         "scoring_key": scoring_key,
-        "title": "Conv2D minority-guaranteed batching and score-scaling OOF search",
+        "title": (
+            f"{model_label} minority-guaranteed batching and score-scaling OOF search"
+        ),
         "training_settings": training_settings,
         "scoring_settings": scoring_settings,
         "source_and_data_fingerprint": training_identity["source_and_data_fingerprint"],
@@ -1211,9 +1277,9 @@ def main() -> None:
         "selection_protocol": (
             "evaluate each pair separately per seed; average metrics across seeds; "
             "exclude no pair; retain Macro-F1 and per-class minority-precision "
-            "markers for diagnostics only; maximize the weaker R2L/U2R recall, "
-            "then their mean recall, Rare Macro-F1, and Macro-F1; minimize the "
-            "recall gap and use multiplicative distance to (1,1) as later tie-breaks"
+            "markers for diagnostics only; maximize mean Rare Macro-F1, then "
+            "mean Macro-F1; use multiplicative distance to (1,1) and Rare "
+            "Macro-F1 sample SD as later tie-breaks"
         ),
         "final_test_policy": (
             "freeze beta, gamma, batching, and score pair before KDDTest+ evaluation"
@@ -1412,6 +1478,7 @@ def main() -> None:
     best.update(
         {
             "schema_version": SCHEMA_VERSION,
+            "architecture": args.architecture,
             "training_key": training_key,
             "scoring_key": scoring_key,
             "cb_beta": float(args.cb_beta),
@@ -1430,7 +1497,7 @@ def main() -> None:
     )
     core.atomic_json(best_path, best)
     readable_path.write_text(
-        "Conv2D balanced-batch score-scaling search\n"
+        f"{model_label} balanced-batch score-scaling search\n"
         f"Training key: {training_key}\n"
         f"Scoring key: {scoring_key}\n"
         f"Focal settings: beta={args.cb_beta}, gamma={args.focal_gamma}\n"
@@ -1439,13 +1506,13 @@ def main() -> None:
         f"Diagnostic Macro-F1 marker: {args.macro_f1_retention:.0%} of raw mean\n"
         "Diagnostic minority-precision marker: "
         f"{args.minority_precision_retention:.0%} of each raw mean\n"
-        "No pair excluded by these markers. Ranking: weaker minority recall, "
-        "mean minority recall, "
-        "Rare Macro-F1, Macro-F1, recall balance, distance to (1,1)\n"
+        "No pair excluded by these markers. Ranking: Rare Macro-F1, "
+        "Macro-F1, distance to (1,1), Rare Macro-F1 stability\n"
         "KDDTest+ accessed: NO\n\n" + pretty.to_string(index=False) + "\n",
         encoding="utf-8",
     )
     latest = {
+        "architecture": args.architecture,
         "training_key": training_key,
         "scoring_key": scoring_key,
         "protocol": str(protocol_path),
@@ -1462,7 +1529,7 @@ def main() -> None:
     }
     core.atomic_json(latest_path, latest)
 
-    print("\n=== Ranked Conv2D score-scaling pairs ===")
+    print(f"\n=== Ranked {model_label} score-scaling pairs ===")
     print(pretty.to_string(index=False))
     print(
         "\nSelected coefficients: "
