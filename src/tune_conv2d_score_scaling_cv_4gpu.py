@@ -50,6 +50,8 @@ DEFAULT_BETA = 0.99
 DEFAULT_FOCAL_GAMMA = 0.50
 DEFAULT_MACRO_F1_RETENTION = 0.90
 DEFAULT_MINORITY_PRECISION_RETENTION = 0.80
+TRAINING_MODES = {"baseline_ce", "baseline_batch", "focal_balanced"}
+BALANCED_BATCH_MODES = {"baseline_batch", "focal_balanced"}
 DEFAULT_COEFFICIENTS = [
     0.10,
     0.25,
@@ -71,6 +73,7 @@ ARCHITECTURE_DEFAULTS = {
         "focal_gamma": 0.25,
         "name_prefix": "conv1d_balanced_score_scaling",
         "baseline_name_prefix": "conv1d_baseline_cv",
+        "batch_baseline_name_prefix": "conv1d_batch_baseline_cv",
         "stage1": conv1d_stage1,
     },
     "conv2d": {
@@ -78,6 +81,7 @@ ARCHITECTURE_DEFAULTS = {
         "focal_gamma": DEFAULT_FOCAL_GAMMA,
         "name_prefix": "conv2d_balanced_score_scaling",
         "baseline_name_prefix": "conv2d_baseline_cv",
+        "batch_baseline_name_prefix": "conv2d_batch_baseline_cv",
         "stage1": conv2d_stage1,
     },
     "mlp": {
@@ -85,6 +89,7 @@ ARCHITECTURE_DEFAULTS = {
         "focal_gamma": 0.25,
         "name_prefix": "mlp_balanced_score_scaling",
         "baseline_name_prefix": "mlp_baseline_cv",
+        "batch_baseline_name_prefix": "mlp_batch_baseline_cv",
         "stage1": mlp_stage1,
     },
     "transformer": {
@@ -92,6 +97,7 @@ ARCHITECTURE_DEFAULTS = {
         "focal_gamma": 0.75,
         "name_prefix": "transformer_balanced_score_scaling",
         "baseline_name_prefix": "transformer_baseline_cv",
+        "batch_baseline_name_prefix": "transformer_batch_baseline_cv",
         "stage1": transformer_stage1,
     },
 }
@@ -180,11 +186,11 @@ def worker_result_is_complete(
             ),
             "minority_per_batch": (
                 int(plan["minority_per_batch"])
-                if plan["training_mode"] == "focal_balanced"
+                if plan["training_mode"] in BALANCED_BATCH_MODES
                 else 0
             ),
             "minority_guaranteed_batches": (
-                plan["training_mode"] == "focal_balanced"
+                plan["training_mode"] in BALANCED_BATCH_MODES
             ),
             "validation_used_during_training": False,
             "score_scaling_used": False,
@@ -212,6 +218,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
 
     if args.training_mode == "focal_balanced":
         from cnn_gan_foc import ClassBalancedFocalLoss  # type: ignore
+    if args.training_mode in BALANCED_BATCH_MODES:
         from cnn_opt import BalancedBatchSequence  # type: ignore
 
     if args.architecture == "conv1d":
@@ -268,7 +275,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
     seed = int(args.worker_seed)
     tf.keras.utils.set_random_seed(seed)
     np.random.seed(seed)
-    if args.training_mode == "baseline_ce":
+    if args.training_mode != "focal_balanced":
         alpha = None
         alpha_counts = np.bincount(y_train, minlength=5).astype(np.int64)
         loss: Any = tf.keras.losses.SparseCategoricalCrossentropy()
@@ -326,7 +333,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         X_train = X_train_flat.reshape(-1, 121, 1)
         X_validation = X_validation_flat.reshape(-1, 121, 1)
     started = time.perf_counter()
-    if args.training_mode == "baseline_ce":
+    if args.training_mode not in BALANCED_BATCH_MODES:
         history = model.fit(
             X_train,
             y_train,
@@ -401,21 +408,23 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "model_parameters": parameter_count,
         "loss": (
             "sparse_categorical_crossentropy"
-            if args.training_mode == "baseline_ce"
+            if args.training_mode != "focal_balanced"
             else "class_balanced_focal"
         ),
         "class_weighting": (
             "none"
-            if args.training_mode == "baseline_ce"
+            if args.training_mode != "focal_balanced"
             else "effective_number_from_outer_training_fold"
         ),
         "cb_beta": (
-            None if args.training_mode == "baseline_ce" else float(args.cb_beta)
+            float(args.cb_beta)
+            if args.training_mode == "focal_balanced"
+            else None
         ),
         "focal_gamma": (
-            None
-            if args.training_mode == "baseline_ce"
-            else float(args.focal_gamma)
+            float(args.focal_gamma)
+            if args.training_mode == "focal_balanced"
+            else None
         ),
         "alpha": (
             None if alpha is None else np.asarray(alpha, dtype=float).tolist()
@@ -426,16 +435,16 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "batch_size": int(args.batch_size),
         "batching": (
             "ordinary_shuffled"
-            if args.training_mode == "baseline_ce"
+            if args.training_mode not in BALANCED_BATCH_MODES
             else "minority_guaranteed_with_replacement"
         ),
         "minority_per_batch": (
             0
-            if args.training_mode == "baseline_ce"
+            if args.training_mode not in BALANCED_BATCH_MODES
             else int(args.minority_per_batch)
         ),
         "minority_guaranteed_batches": (
-            args.training_mode == "focal_balanced"
+            args.training_mode in BALANCED_BATCH_MODES
         ),
         "steps_per_epoch": steps_per_epoch,
         "validation_used_during_training": False,
@@ -516,9 +525,11 @@ def build_worker_command(
                 str(args.cb_beta),
                 "--focal-gamma",
                 str(args.focal_gamma),
-                "--minority-per-batch",
-                str(args.minority_per_batch),
             ]
+        )
+    if args.training_mode in BALANCED_BATCH_MODES:
+        command.extend(
+            ["--minority-per-batch", str(args.minority_per_batch)]
         )
     if args.deterministic_ops:
         command.append("--deterministic-ops")
@@ -1010,11 +1021,13 @@ def add_arguments(
     )
     parser.add_argument(
         "--training-mode",
-        choices=["focal_balanced", "baseline_ce"],
+        choices=sorted(TRAINING_MODES),
         default=default_training_mode,
         help=(
             "focal_balanced uses class-balanced focal loss and minority-guaranteed "
-            "batches; baseline_ce uses ordinary cross-entropy and shuffled batches"
+            "batches; baseline_batch uses ordinary cross-entropy with the same "
+            "minority-guaranteed batches; baseline_ce uses ordinary cross-entropy "
+            "and shuffled batches"
         ),
     )
     parser.add_argument("--gpus", nargs="+", default=["0", "1", "2", "3"])
@@ -1082,7 +1095,7 @@ def validate_arguments(
             parser.error("--focal-gamma must be finite and greater than zero.")
     if args.epochs <= 0 or args.batch_size <= 0:
         parser.error("--epochs and --batch-size must be positive.")
-    if args.training_mode == "focal_balanced":
+    if args.training_mode in BALANCED_BATCH_MODES:
         if args.minority_per_batch <= 0:
             parser.error("--minority-per-batch must be positive.")
         if 2 * args.minority_per_batch > args.batch_size:
@@ -1100,11 +1113,11 @@ def validate_arguments(
         parser.error("Every score coefficient must be finite and positive.")
     if sum(np.isclose(value, 1.0) for value in values) != 1:
         parser.error("The coefficient grid must contain 1.0 exactly once.")
-    if args.training_mode == "baseline_ce" and (
+    if args.training_mode in {"baseline_ce", "baseline_batch"} and (
         len(values) != 1 or not np.isclose(values[0], 1.0)
     ):
         parser.error(
-            "The pure baseline requires --coefficient-values 1.0 (raw argmax only)."
+            "Baseline ablations require --coefficient-values 1.0 (raw argmax only)."
         )
     if len(values) ** 2 > 10_000:
         parser.error("The score grid cannot exceed 10,000 pairs.")
@@ -1121,15 +1134,16 @@ def main(
 ) -> None:
     if default_architecture not in ARCHITECTURE_DEFAULTS:
         raise ValueError(f"Unsupported default architecture: {default_architecture}")
-    if default_training_mode not in {"focal_balanced", "baseline_ce"}:
+    if default_training_mode not in TRAINING_MODES:
         raise ValueError(f"Unsupported default training mode: {default_training_mode}")
     repo_root = Path(__file__).resolve().parents[1]
     script_path = Path(__file__).resolve()
     parser = argparse.ArgumentParser(
         description=(
-            "Train MLP, Conv1D, Conv2D, or Transformer OOF models either as pure "
-            "cross-entropy baselines or with the focal/batching/scaling pipeline, "
-            "without accessing KDDTest+."
+            "Train MLP, Conv1D, Conv2D, or Transformer OOF models as pure "
+            "cross-entropy baselines, cross-entropy plus minority-batch ablations, "
+            "or with the focal/batching/scaling pipeline, without accessing "
+            "KDDTest+."
         )
     )
     add_arguments(parser, default_architecture, default_training_mode)
@@ -1146,7 +1160,7 @@ def main(
         else:
             args.coefficient_values = (
                 [1.0]
-                if args.training_mode == "baseline_ce"
+                if args.training_mode in {"baseline_ce", "baseline_batch"}
                 else list(DEFAULT_COEFFICIENTS)
             )
     if args.name_prefix is None:
@@ -1156,7 +1170,11 @@ def main(
             prefix_key = (
                 "baseline_name_prefix"
                 if args.training_mode == "baseline_ce"
-                else "name_prefix"
+                else (
+                    "batch_baseline_name_prefix"
+                    if args.training_mode == "baseline_batch"
+                    else "name_prefix"
+                )
             )
             args.name_prefix = str(architecture_defaults[prefix_key])
     validate_arguments(parser, args)
@@ -1233,21 +1251,23 @@ def main(
         "training_mode": args.training_mode,
         "loss": (
             "sparse_categorical_crossentropy"
-            if args.training_mode == "baseline_ce"
+            if args.training_mode != "focal_balanced"
             else "class_balanced_focal"
         ),
         "class_weighting": (
             "none"
-            if args.training_mode == "baseline_ce"
+            if args.training_mode != "focal_balanced"
             else "effective_number_from_outer_training_fold"
         ),
         "cb_beta": (
-            None if args.training_mode == "baseline_ce" else float(args.cb_beta)
+            float(args.cb_beta)
+            if args.training_mode == "focal_balanced"
+            else None
         ),
         "focal_gamma": (
-            None
-            if args.training_mode == "baseline_ce"
-            else float(args.focal_gamma)
+            float(args.focal_gamma)
+            if args.training_mode == "focal_balanced"
+            else None
         ),
         "training_seeds": [int(seed) for seed in args.seeds],
         "fold_count": FOLD_COUNT,
@@ -1256,12 +1276,12 @@ def main(
         "batch_size": int(args.batch_size),
         "batching": (
             "ordinary_shuffled"
-            if args.training_mode == "baseline_ce"
+            if args.training_mode not in BALANCED_BATCH_MODES
             else "minority_guaranteed_with_replacement"
         ),
         "minority_per_batch": (
             0
-            if args.training_mode == "baseline_ce"
+            if args.training_mode not in BALANCED_BATCH_MODES
             else int(args.minority_per_batch)
         ),
         "validation_used_during_training": False,
@@ -1352,18 +1372,18 @@ def main(
                     "fold_id": fold_id,
                     "fold_number": fold_id + 1,
                     "cb_beta": (
-                        None
-                        if args.training_mode == "baseline_ce"
-                        else float(args.cb_beta)
+                        float(args.cb_beta)
+                        if args.training_mode == "focal_balanced"
+                        else None
                     ),
                     "focal_gamma": (
-                        None
-                        if args.training_mode == "baseline_ce"
-                        else float(args.focal_gamma)
+                        float(args.focal_gamma)
+                        if args.training_mode == "focal_balanced"
+                        else None
                     ),
                     "minority_per_batch": (
                         0
-                        if args.training_mode == "baseline_ce"
+                        if args.training_mode not in BALANCED_BATCH_MODES
                         else int(args.minority_per_batch)
                     ),
                     "planned_gpu": gpus[len(plans) % len(gpus)],
@@ -1385,6 +1405,8 @@ def main(
 
     if args.training_mode == "baseline_ce":
         print(f"{model_label} pure cross-entropy baseline OOF evaluation")
+    elif args.training_mode == "baseline_batch":
+        print(f"{model_label} cross-entropy + minority-batch OOF evaluation")
     elif raw_argmax_only:
         print(f"{model_label} focal-loss + minority-batch OOF evaluation")
     else:
@@ -1400,6 +1422,15 @@ def main(
         print("Batches: ordinary shuffled mini-batches")
         print("Decision policy: raw multiclass argmax")
         print("Enhancements: no focal loss, guaranteed batches, CTGAN, or scaling")
+    elif args.training_mode == "baseline_batch":
+        print(f"Batch-only trainings: {len(plans)}")
+        print("Loss: sparse categorical cross-entropy (no class weighting)")
+        print(
+            f"Guaranteed per batch: {args.minority_per_batch} R2L + "
+            f"{args.minority_per_batch} U2R"
+        )
+        print("Decision policy: raw multiclass argmax")
+        print("Focal loss: NO; score scaling: NO; CTGAN: NO")
     else:
         print(f"Frozen focal settings: beta={args.cb_beta}, gamma={args.focal_gamma}")
         print(f"Balanced-batch trainings: {len(plans)}")
@@ -1475,12 +1506,17 @@ def main(
             f"{model_label} pure cross-entropy baseline OOF evaluation"
             if args.training_mode == "baseline_ce"
             else (
-                f"{model_label} focal-loss and minority-guaranteed-batch "
+                f"{model_label} cross-entropy and minority-guaranteed-batch "
                 "raw-argmax OOF evaluation"
-                if raw_argmax_only
+                if args.training_mode == "baseline_batch"
                 else (
-                    f"{model_label} minority-guaranteed batching and "
-                    "score-scaling OOF search"
+                    f"{model_label} focal-loss and minority-guaranteed-batch "
+                    "raw-argmax OOF evaluation"
+                    if raw_argmax_only
+                    else (
+                        f"{model_label} minority-guaranteed batching and "
+                        "score-scaling OOF search"
+                    )
                 )
             )
         ),
@@ -1536,12 +1572,17 @@ def main(
             "use the unchanged architecture and raw argmax for later KDDTest+ evaluation"
             if args.training_mode == "baseline_ce"
             else (
-                "freeze beta, gamma, and minority-guaranteed batching; retain raw "
-                "argmax before later KDDTest+ evaluation"
-                if raw_argmax_only
+                "freeze minority-guaranteed batching with ordinary cross-entropy; "
+                "retain raw argmax before later KDDTest+ evaluation"
+                if args.training_mode == "baseline_batch"
                 else (
-                    "freeze beta, gamma, batching, and score pair before KDDTest+ "
-                    "evaluation"
+                    "freeze beta, gamma, and minority-guaranteed batching; retain "
+                    "raw argmax before later KDDTest+ evaluation"
+                    if raw_argmax_only
+                    else (
+                        "freeze beta, gamma, batching, and score pair before "
+                        "KDDTest+ evaluation"
+                    )
                 )
             )
         ),
@@ -1712,9 +1753,13 @@ def main(
         f"{scoring_stem}_baseline_summary.json"
         if args.training_mode == "baseline_ce"
         else (
-            f"{scoring_stem}_focal_batch_summary.json"
-            if raw_argmax_only
-            else f"{scoring_stem}_best_scaling.json"
+            f"{scoring_stem}_batch_baseline_summary.json"
+            if args.training_mode == "baseline_batch"
+            else (
+                f"{scoring_stem}_focal_batch_summary.json"
+                if raw_argmax_only
+                else f"{scoring_stem}_best_scaling.json"
+            )
         )
     )
     comparison_path = results_dir / (
@@ -1764,18 +1809,18 @@ def main(
             "training_key": training_key,
             "scoring_key": scoring_key,
             "cb_beta": (
-                None
-                if args.training_mode == "baseline_ce"
-                else float(args.cb_beta)
+                float(args.cb_beta)
+                if args.training_mode == "focal_balanced"
+                else None
             ),
             "focal_gamma": (
-                None
-                if args.training_mode == "baseline_ce"
-                else float(args.focal_gamma)
+                float(args.focal_gamma)
+                if args.training_mode == "focal_balanced"
+                else None
             ),
             "minority_per_batch": (
                 0
-                if args.training_mode == "baseline_ce"
+                if args.training_mode not in BALANCED_BATCH_MODES
                 else int(args.minority_per_batch)
             ),
             "training_seeds": [int(seed) for seed in args.seeds],
@@ -1800,6 +1845,20 @@ def main(
             "Batches: ordinary shuffled; decision: raw argmax\n"
             "Focal loss: NO; minority-guaranteed batching: NO; CTGAN: NO; "
             "score scaling: NO\n"
+            "KDDTest+ accessed: NO\n\n"
+            + pretty.to_string(index=False)
+            + "\n"
+        )
+    elif args.training_mode == "baseline_batch":
+        readable_text = (
+            f"{model_label} cross-entropy + minority-guaranteed-batch OOF evaluation\n"
+            f"Training key: {training_key}\n"
+            f"Scoring key: {scoring_key}\n"
+            f"Seeds: {args.seeds}; folds: {FOLD_COUNT}\n"
+            "Loss: sparse categorical cross-entropy; no class weighting\n"
+            f"Guaranteed per batch: {args.minority_per_batch} R2L + "
+            f"{args.minority_per_batch} U2R\n"
+            "Focal loss: NO; decision: raw argmax; CTGAN: NO; score scaling: NO\n"
             "KDDTest+ accessed: NO\n\n"
             + pretty.to_string(index=False)
             + "\n"
@@ -1856,6 +1915,12 @@ def main(
 
     if args.training_mode == "baseline_ce":
         print(f"\n=== {model_label} pure baseline OOF results ===")
+        print(pretty.to_string(index=False))
+        print(f"Per-seed raw metrics: {raw_seed_path}")
+        print(f"Numeric mean/std summary: {ranking_path}")
+        print(f"Readable summary: {readable_path}")
+    elif args.training_mode == "baseline_batch":
+        print(f"\n=== {model_label} batch-only OOF results ===")
         print(pretty.to_string(index=False))
         print(f"Per-seed raw metrics: {raw_seed_path}")
         print(f"Numeric mean/std summary: {ranking_path}")
