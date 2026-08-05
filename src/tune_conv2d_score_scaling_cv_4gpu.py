@@ -1029,9 +1029,7 @@ def add_arguments(
         "--coefficient-values",
         type=float,
         nargs="+",
-        default=(
-            [1.0] if default_training_mode == "baseline_ce" else DEFAULT_COEFFICIENTS
-        ),
+        default=None,
     )
     parser.add_argument(
         "--macro-f1-retention", type=float, default=DEFAULT_MACRO_F1_RETENTION
@@ -1138,6 +1136,12 @@ def main(
     architecture_defaults = ARCHITECTURE_DEFAULTS[args.architecture]
     if args.focal_gamma is None:
         args.focal_gamma = float(architecture_defaults["focal_gamma"])
+    if args.coefficient_values is None:
+        args.coefficient_values = (
+            [1.0]
+            if args.training_mode == "baseline_ce"
+            else list(DEFAULT_COEFFICIENTS)
+        )
     if args.name_prefix is None:
         prefix_key = (
             "baseline_name_prefix"
