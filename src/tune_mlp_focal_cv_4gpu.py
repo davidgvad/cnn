@@ -9,11 +9,12 @@ Default experiment
 * Repetition: training seeds {0, 1, 2} on one frozen four-fold split.
 * Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.
 
-The four folds are assigned to four GPUs. For every beta/gamma/seed setting,
-GPU i trains on three folds and predicts fold i. The four predictions are then
-placed back in original row order to form one complete out-of-fold prediction
-vector. Metrics are calculated once on that vector for each seed, followed by
-mean and sample standard deviation across the three seeds.
+Independent fold fits are distributed across the requested GPU workers. With
+two GPUs, two folds train concurrently and the remaining folds follow from the
+same work queue. The four predictions are then placed back in original row
+order to form one complete out-of-fold prediction vector. Metrics are
+calculated once on that vector for each seed, followed by mean and sample
+standard deviation across the three seeds.
 
 Each fit runs in a fresh subprocess with exactly one visible GPU. Completed
 artifacts are validated and reused when the same command is rerun.
@@ -27,6 +28,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import queue
 import shlex
 import subprocess
 import sys
@@ -76,6 +78,27 @@ def progress_bar(completed: int, total: int, width: int = 30) -> str:
     bar = "#" * filled + "-" * (width - filled)
     percentage = 100.0 * completed / total
     return f"[{bar}] {percentage:6.2f}% ({completed}/{total})"
+
+
+def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
+    """Map logical worker IDs onto Slurm's allocated CUDA device tokens."""
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    allocated_tokens = [token.strip() for token in visible.split(",") if token.strip()]
+    logical_indices: List[int] = []
+    try:
+        logical_indices = [int(gpu) for gpu in gpus]
+    except ValueError:
+        pass
+    if (
+        allocated_tokens
+        and len(logical_indices) == len(gpus)
+        and all(0 <= index < len(allocated_tokens) for index in logical_indices)
+    ):
+        return {
+            gpu: allocated_tokens[index]
+            for gpu, index in zip(gpus, logical_indices, strict=True)
+        }
+    return {gpu: gpu for gpu in gpus}
 
 
 def configurations(
@@ -845,7 +868,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--gpus",
         nargs="+",
         default=["0", "1", "2", "3"],
-        help="Exactly four GPU IDs, mapped in order to folds 1..4 (default: 0 1 2 3).",
+        help=(
+            "One to four logical GPU IDs used as independent workers "
+            "(default: 0 1 2 3)."
+        ),
     )
     parser.add_argument(
         "--seeds",
@@ -984,7 +1010,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script_path = Path(__file__).resolve()
     parser = argparse.ArgumentParser(
-        description=("Four-GPU, four-fold MLP focal beta/gamma tuning on KDDTrain+.")
+        description=("Multi-GPU, four-fold MLP focal beta/gamma tuning on KDDTrain+.")
     )
     add_arguments(parser)
     args = parser.parse_args()
@@ -1017,11 +1043,11 @@ def main() -> None:
         gpus = core.parse_gpus(args.gpus)
     except ValueError as error:
         parser.error(str(error))
-    if len(gpus) != FOLD_COUNT:
+    if len(gpus) > FOLD_COUNT:
         parser.error(
-            f"This runner maps one fold to each GPU and therefore requires "
-            f"exactly {FOLD_COUNT} GPU IDs."
+            f"This four-fold runner supports at most {FOLD_COUNT} GPU workers."
         )
+    cuda_tokens = resolve_cuda_tokens(gpus)
 
     train_path = repo_root / "data" / "KDDTrain+.txt"
     required_paths = [
@@ -1111,7 +1137,8 @@ def main() -> None:
                         "seed": int(seed),
                         "fold_id": fold_id,
                         "fold_number": fold_id + 1,
-                        "assigned_gpu": gpus[fold_id],
+                        "planned_gpu": gpus[len(plans) % len(gpus)],
+                        "assigned_gpu": "",
                         "deterministic_ops_requested": bool(args.deterministic_ops),
                         "run_name": run_name,
                         "train_indices_sha256": fold["train_indices_sha256"],
@@ -1136,7 +1163,8 @@ def main() -> None:
 
     print("MLP focal-loss Stage-1 sweep")
     print(f"Experiment key: {experiment_key}")
-    print(f"GPUs (fold 1..4): {gpus}")
+    print(f"GPU workers: {gpus}")
+    print(f"CUDA allocation mapping: {cuda_tokens}")
     print(f"Betas: {args.betas}")
     print(f"Focal gammas: {args.focal_gammas}")
     print(f"Training seeds: {args.seeds}")
@@ -1155,7 +1183,7 @@ def main() -> None:
                 script_path, plan, args, attempt_id="dry_run"
             )
             print(
-                f"[GPU {plan['assigned_gpu']} -> fold {plan['fold_number']}] "
+                f"[planned GPU {plan['planned_gpu']} -> fold {plan['fold_number']}] "
                 f"{shlex.join(command)}"
             )
         if len(shown) < len(plans):
@@ -1217,6 +1245,9 @@ def main() -> None:
         "expected_fits": len(plans),
         "expected_seed_level_oof_rows": len(configs) * len(args.seeds),
         "expected_ranking_rows": len(configs),
+        "runtime_gpu_workers": gpus,
+        "runtime_cuda_mapping": cuda_tokens,
+        "parallel_worker_count": len(gpus),
         "preprocessing_protocol": (
             "encoder and MinMax scaler fitted independently on each outer "
             "training partition only"
@@ -1254,6 +1285,7 @@ def main() -> None:
     stop_event = threading.Event()
     statuses: Dict[str, str] = {}
     runtimes: Dict[str, float] = {}
+    assigned_gpus: Dict[str, str] = {}
     failures: List[str] = []
     pending_plans: List[Dict[str, Any]] = []
     for plan in plans:
@@ -1261,13 +1293,15 @@ def main() -> None:
         if not args.rerun and result_is_complete(Path(plan["result_path"]), plan):
             statuses[run_name] = "skipped_complete"
             runtimes[run_name] = 0.0
+            assigned_gpus[run_name] = str(
+                core.read_json(Path(plan["result_path"])).get("assigned_gpu", "")
+            )
         else:
             pending_plans.append(plan)
     completed_counter = len(plans) - len(pending_plans)
-    plans_by_fold = {
-        fold_id: [plan for plan in pending_plans if int(plan["fold_id"]) == fold_id]
-        for fold_id in range(FOLD_COUNT)
-    }
+    task_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
+    for plan in pending_plans:
+        task_queue.put(plan)
     if completed_counter:
         print(
             f"Resume check: {completed_counter} verified fits already complete; "
@@ -1281,25 +1315,28 @@ def main() -> None:
 
     def execute_plan(
         gpu: str,
-        fold_id: int,
+        cuda_token: str,
         plan: Dict[str, Any],
     ) -> tuple[str, float, str | None]:
         run_name = str(plan["run_name"])
+        fold_id = int(plan["fold_id"])
         result_path = Path(plan["result_path"])
         attempt_id = hashlib.sha256(
             f"{run_name}:{time.time_ns()}:{os.getpid()}".encode("utf-8")
         ).hexdigest()[:16]
         command = build_worker_command(script_path, plan, args, attempt_id)
         environment = os.environ.copy()
-        environment["CUDA_VISIBLE_DEVICES"] = gpu
+        environment["CUDA_VISIBLE_DEVICES"] = cuda_token
         environment["EXPERIMENT_GPU_ID"] = gpu
+        environment["EXPERIMENT_CUDA_TOKEN"] = cuda_token
         environment["PYTHONHASHSEED"] = str(plan["seed"])
         environment["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
         environment.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
         log_path = Path(plan["log_path"])
         with print_lock:
             print(
-                f"[GPU {gpu} | fold {fold_id + 1}] START {run_name}",
+                f"[GPU {gpu} (CUDA {cuda_token}) | fold {fold_id + 1}] "
+                f"START {run_name}",
                 flush=True,
             )
         started = time.perf_counter()
@@ -1336,14 +1373,19 @@ def main() -> None:
                 f"{run_name}: controller error={error!r}, log={log_path}",
             )
 
-    def gpu_worker(gpu: str, fold_id: int) -> None:
+    def gpu_worker(gpu: str, cuda_token: str) -> None:
         nonlocal completed_counter
-        for plan in plans_by_fold[fold_id]:
+        while True:
             if stop_event.is_set():
                 return
-            run_name = str(plan["run_name"])
             try:
-                status, runtime, failure = execute_plan(gpu, fold_id, plan)
+                plan = task_queue.get_nowait()
+            except queue.Empty:
+                return
+            run_name = str(plan["run_name"])
+            fold_id = int(plan["fold_id"])
+            try:
+                status, runtime, failure = execute_plan(gpu, cuda_token, plan)
             except Exception as error:  # Catch failures before log creation too.
                 status = "failed"
                 runtime = 0.0
@@ -1351,6 +1393,7 @@ def main() -> None:
             with state_lock:
                 statuses[run_name] = status
                 runtimes[run_name] = runtime
+                assigned_gpus[run_name] = gpu
                 if status == "failed":
                     failures.append(failure or f"{run_name}: unknown failure")
                     stop_event.set()
@@ -1360,17 +1403,16 @@ def main() -> None:
                 with state_lock:
                     progress = completed_counter
                 print(
-                    f"[GPU {gpu} | fold {fold_id + 1}] {status.upper()} "
+                    f"[GPU {gpu} (CUDA {cuda_token}) | fold {fold_id + 1}] "
+                    f"{status.upper()} "
                     f"{run_name} ({runtime / 60.0:.1f} min)\n"
                     f"Overall progress: {progress_bar(progress, len(plans))}",
                     flush=True,
                 )
+            task_queue.task_done()
 
-    with ThreadPoolExecutor(max_workers=FOLD_COUNT) as executor:
-        futures = [
-            executor.submit(gpu_worker, gpus[fold_id], fold_id)
-            for fold_id in range(FOLD_COUNT)
-        ]
+    with ThreadPoolExecutor(max_workers=len(gpus)) as executor:
+        futures = [executor.submit(gpu_worker, gpu, cuda_tokens[gpu]) for gpu in gpus]
         for future in futures:
             future.result()
 
@@ -1378,6 +1420,7 @@ def main() -> None:
         {
             **plan,
             "status": statuses.get(plan["run_name"], "not_started"),
+            "assigned_gpu": assigned_gpus.get(plan["run_name"], ""),
             "runtime_seconds": runtimes.get(plan["run_name"]),
         }
         for plan in plans
