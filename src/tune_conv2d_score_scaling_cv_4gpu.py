@@ -1,14 +1,10 @@
-"""Tune neural-model rare-class score scaling from balanced-batch OOF predictions.
+"""Evaluate raw or score-scaled neural models from leakage-free OOF predictions.
 
-This is the second and third stage of the controlled imbalance pipeline:
-
-1. Freeze the architecture's Stage-1 focal settings.
-2. Train one model for each of four fixed folds and three training seeds while
-   guaranteeing one R2L and one U2R example in every mini-batch.
-3. Restore the four validation folds to original row order, producing one
-   complete KDDTrain+ out-of-fold probability matrix per seed.
-4. Search R2L/U2R score-scaling pairs from those saved probabilities. Scaling
-   is post hoc and never retrains a model.
+The shared runner supports pure cross-entropy baselines, batch-only ablations,
+and the focal-loss plus minority-batch pipeline.  For score-scaling searches it
+trains one model for each of four fixed folds and three seeds, restores each
+seed's folds to original row order, and searches R2L/U2R coefficient pairs from
+the saved probabilities without retraining.
 
 KDDTest+ and synthetic data are never accessed. The held-out fold is not
 passed to model.fit: training uses a fixed epoch budget with no validation
@@ -66,6 +62,32 @@ DEFAULT_COEFFICIENTS = [
     1.60,
     1.75,
     1.90,
+]
+BASELINE_SCALING_COEFFICIENTS = [
+    0.10,
+    0.25,
+    0.40,
+    0.55,
+    0.70,
+    0.85,
+    1.00,
+    1.15,
+    1.30,
+    1.45,
+    1.60,
+    1.75,
+    1.90,
+    2.20,
+    2.50,
+    3.00,
+    3.50,
+    4.00,
+    4.50,
+    5.00,
+    6.00,
+    7.00,
+    8.00,
+    10.00,
 ]
 ARCHITECTURE_DEFAULTS = {
     "conv1d": {
@@ -1113,11 +1135,12 @@ def validate_arguments(
         parser.error("Every score coefficient must be finite and positive.")
     if sum(np.isclose(value, 1.0) for value in values) != 1:
         parser.error("The coefficient grid must contain 1.0 exactly once.")
-    if args.training_mode in {"baseline_ce", "baseline_batch"} and (
+    if args.training_mode == "baseline_batch" and (
         len(values) != 1 or not np.isclose(values[0], 1.0)
     ):
         parser.error(
-            "Baseline ablations require --coefficient-values 1.0 (raw argmax only)."
+            "The batch-only ablation requires --coefficient-values 1.0 "
+            "(raw argmax only)."
         )
     if len(values) ** 2 > 10_000:
         parser.error("The score grid cannot exceed 10,000 pairs.")
@@ -1181,6 +1204,9 @@ def main(
     raw_argmax_only = (
         len(args.coefficient_values) == 1
         and np.isclose(float(args.coefficient_values[0]), 1.0)
+    )
+    baseline_score_scaling = (
+        args.training_mode == "baseline_ce" and not raw_argmax_only
     )
 
     if args.worker_mode == "train":
@@ -1403,7 +1429,9 @@ def main(
     if len(plans) != expected_fits:
         raise RuntimeError("Training plan count is inconsistent.")
 
-    if args.training_mode == "baseline_ce":
+    if baseline_score_scaling:
+        print(f"{model_label} cross-entropy baseline + score-scaling OOF search")
+    elif args.training_mode == "baseline_ce":
         print(f"{model_label} pure cross-entropy baseline OOF evaluation")
     elif args.training_mode == "baseline_batch":
         print(f"{model_label} cross-entropy + minority-batch OOF evaluation")
@@ -1420,8 +1448,13 @@ def main(
         print(f"Baseline trainings: {len(plans)}")
         print("Loss: sparse categorical cross-entropy (no class weighting)")
         print("Batches: ordinary shuffled mini-batches")
-        print("Decision policy: raw multiclass argmax")
-        print("Enhancements: no focal loss, guaranteed batches, CTGAN, or scaling")
+        if baseline_score_scaling:
+            print(f"Score-scaling pairs: {len(args.coefficient_values) ** 2}")
+            print("Decision policy: validation-selected R2L/U2R score scaling")
+            print("Focal loss: NO; guaranteed batches: NO; CTGAN: NO")
+        else:
+            print("Decision policy: raw multiclass argmax")
+            print("Enhancements: no focal loss, guaranteed batches, CTGAN, or scaling")
     elif args.training_mode == "baseline_batch":
         print(f"Batch-only trainings: {len(plans)}")
         print("Loss: sparse categorical cross-entropy (no class weighting)")
@@ -1503,19 +1536,23 @@ def main(
         "training_key": training_key,
         "scoring_key": scoring_key,
         "title": (
-            f"{model_label} pure cross-entropy baseline OOF evaluation"
-            if args.training_mode == "baseline_ce"
+            f"{model_label} cross-entropy baseline and score-scaling OOF search"
+            if baseline_score_scaling
             else (
-                f"{model_label} cross-entropy and minority-guaranteed-batch "
-                "raw-argmax OOF evaluation"
-                if args.training_mode == "baseline_batch"
+                f"{model_label} pure cross-entropy baseline OOF evaluation"
+                if args.training_mode == "baseline_ce"
                 else (
-                    f"{model_label} focal-loss and minority-guaranteed-batch "
+                    f"{model_label} cross-entropy and minority-guaranteed-batch "
                     "raw-argmax OOF evaluation"
-                    if raw_argmax_only
+                    if args.training_mode == "baseline_batch"
                     else (
-                        f"{model_label} minority-guaranteed batching and "
-                        "score-scaling OOF search"
+                        f"{model_label} focal-loss and minority-guaranteed-batch "
+                        "raw-argmax OOF evaluation"
+                        if raw_argmax_only
+                        else (
+                            f"{model_label} minority-guaranteed batching and "
+                            "score-scaling OOF search"
+                        )
                     )
                 )
             )
@@ -1569,19 +1606,23 @@ def main(
             )
         ),
         "final_test_policy": (
-            "use the unchanged architecture and raw argmax for later KDDTest+ evaluation"
-            if args.training_mode == "baseline_ce"
+            "freeze the validation-selected score pair before later KDDTest+ evaluation"
+            if baseline_score_scaling
             else (
-                "freeze minority-guaranteed batching with ordinary cross-entropy; "
-                "retain raw argmax before later KDDTest+ evaluation"
-                if args.training_mode == "baseline_batch"
+                "use the unchanged architecture and raw argmax for later KDDTest+ evaluation"
+                if args.training_mode == "baseline_ce"
                 else (
-                    "freeze beta, gamma, and minority-guaranteed batching; retain "
-                    "raw argmax before later KDDTest+ evaluation"
-                    if raw_argmax_only
+                    "freeze minority-guaranteed batching with ordinary cross-entropy; "
+                    "retain raw argmax before later KDDTest+ evaluation"
+                    if args.training_mode == "baseline_batch"
                     else (
-                        "freeze beta, gamma, batching, and score pair before "
-                        "KDDTest+ evaluation"
+                        "freeze beta, gamma, and minority-guaranteed batching; retain "
+                        "raw argmax before later KDDTest+ evaluation"
+                        if raw_argmax_only
+                        else (
+                            "freeze beta, gamma, batching, and score pair before "
+                            "KDDTest+ evaluation"
+                        )
                     )
                 )
             )
@@ -1750,15 +1791,19 @@ def main(
     formatted_path = results_dir / f"{scoring_stem}_top_formatted.csv"
     readable_path = results_dir / f"{scoring_stem}_summary.txt"
     best_path = results_dir / (
-        f"{scoring_stem}_baseline_summary.json"
-        if args.training_mode == "baseline_ce"
+        f"{scoring_stem}_best_scaling.json"
+        if baseline_score_scaling
         else (
-            f"{scoring_stem}_batch_baseline_summary.json"
-            if args.training_mode == "baseline_batch"
+            f"{scoring_stem}_baseline_summary.json"
+            if args.training_mode == "baseline_ce"
             else (
-                f"{scoring_stem}_focal_batch_summary.json"
-                if raw_argmax_only
-                else f"{scoring_stem}_best_scaling.json"
+                f"{scoring_stem}_batch_baseline_summary.json"
+                if args.training_mode == "baseline_batch"
+                else (
+                    f"{scoring_stem}_focal_batch_summary.json"
+                    if raw_argmax_only
+                    else f"{scoring_stem}_best_scaling.json"
+                )
             )
         )
     )
@@ -1835,7 +1880,24 @@ def main(
         }
     )
     core.atomic_json(best_path, best)
-    if args.training_mode == "baseline_ce":
+    if baseline_score_scaling:
+        readable_text = (
+            f"{model_label} cross-entropy baseline + score-scaling OOF search\n"
+            f"Training key: {training_key}\n"
+            f"Scoring key: {scoring_key}\n"
+            f"Seeds: {args.seeds}; folds: {FOLD_COUNT}\n"
+            "Loss: sparse categorical cross-entropy; no class weighting\n"
+            "Batches: ordinary shuffled; focal loss: NO; "
+            "minority-guaranteed batching: NO; CTGAN: NO\n"
+            f"Coefficient values: {coefficients}\n"
+            "Scaling is evaluated from saved OOF probabilities without retraining. "
+            "Ranking: Rare Macro-F1, Macro-F1, distance to (1,1), "
+            "Rare Macro-F1 stability\n"
+            "KDDTest+ accessed: NO\n\n"
+            + pretty.to_string(index=False)
+            + "\n"
+        )
+    elif args.training_mode == "baseline_ce":
         readable_text = (
             f"{model_label} pure cross-entropy baseline OOF evaluation\n"
             f"Training key: {training_key}\n"
@@ -1913,7 +1975,18 @@ def main(
     }
     core.atomic_json(latest_path, latest)
 
-    if args.training_mode == "baseline_ce":
+    if baseline_score_scaling:
+        print(f"\n=== Ranked {model_label} baseline score-scaling pairs ===")
+        print(pretty.to_string(index=False))
+        print(
+            "\nSelected coefficients: "
+            f"R2L={best['r2l_score_coefficient']}, "
+            f"U2R={best['u2r_score_coefficient']}"
+        )
+        print(f"Raw versus selected: {comparison_path}")
+        print(f"Full numeric ranking: {ranking_path}")
+        print(f"Best scaling: {best_path}")
+    elif args.training_mode == "baseline_ce":
         print(f"\n=== {model_label} pure baseline OOF results ===")
         print(pretty.to_string(index=False))
         print(f"Per-seed raw metrics: {raw_seed_path}")
