@@ -1,4 +1,4 @@
-"""Tune Conv1D or Conv2D rare-class score scaling from balanced-batch OOF predictions.
+"""Tune neural-model rare-class score scaling from balanced-batch OOF predictions.
 
 This is the second and third stage of the controlled imbalance pipeline:
 
@@ -38,6 +38,7 @@ import pandas as pd
 import run_no_ctgan_model_ablation_4gpu as core
 import tune_conv1d_focal_cv_4gpu as conv1d_stage1
 import tune_conv2d_focal_cv_4gpu as conv2d_stage1
+import tune_transformer_focal_cv_4gpu as transformer_stage1
 
 
 SCHEMA_VERSION = 1
@@ -75,6 +76,12 @@ ARCHITECTURE_DEFAULTS = {
         "focal_gamma": DEFAULT_FOCAL_GAMMA,
         "name_prefix": "conv2d_balanced_score_scaling",
         "stage1": conv2d_stage1,
+    },
+    "transformer": {
+        "label": "Transformer",
+        "focal_gamma": 0.75,
+        "name_prefix": "transformer_balanced_score_scaling",
+        "stage1": transformer_stage1,
     },
 }
 stage1 = conv2d_stage1
@@ -182,8 +189,12 @@ def run_training_worker(args: argparse.Namespace) -> None:
 
     if args.architecture == "conv1d":
         from cnn_opt_1d_4gpu import build_opt_cnn_1d as build_model  # type: ignore
-    else:
+    elif args.architecture == "conv2d":
         from cnn_opt import build_opt_cnn as build_model  # type: ignore
+    else:
+        from cnn_opt_1d_4gpu import (  # type: ignore
+            build_vanilla_transformer as build_model,
+        )
 
     cache_path = Path(args.worker_cache_path)
     cache_metadata_path = Path(args.worker_cache_metadata_path)
@@ -234,16 +245,28 @@ def run_training_worker(args: argparse.Namespace) -> None:
         num_classes=5,
     )
     loss = ClassBalancedFocalLoss(alpha=alpha, gamma=float(args.focal_gamma))
-    model = build_model(
-        loss=loss,
-        groups=FIXED_BACKBONE["groups"],
-        base_filters=FIXED_BACKBONE["base_filters"],
-        dense_units=FIXED_BACKBONE["dense_units"],
-        dropout1=FIXED_BACKBONE["dropout1"],
-        dropout2=FIXED_BACKBONE["dropout2"],
-        use_batch_norm=FIXED_BACKBONE["batch_norm"],
-        use_residual=FIXED_BACKBONE["residual"],
-    )
+    if args.architecture == "transformer":
+        model = build_model(
+            loss=loss,
+            d_model=FIXED_BACKBONE["d_model"],
+            num_heads=FIXED_BACKBONE["num_heads"],
+            num_blocks=FIXED_BACKBONE["blocks"],
+            ff_dim=FIXED_BACKBONE["ff_dim"],
+            dense_units=FIXED_BACKBONE["dense_units"],
+            transformer_dropout=FIXED_BACKBONE["dropout"],
+            head_dropout=FIXED_BACKBONE["head_dropout"],
+        )
+    else:
+        model = build_model(
+            loss=loss,
+            groups=FIXED_BACKBONE["groups"],
+            base_filters=FIXED_BACKBONE["base_filters"],
+            dense_units=FIXED_BACKBONE["dense_units"],
+            dropout1=FIXED_BACKBONE["dropout1"],
+            dropout2=FIXED_BACKBONE["dropout2"],
+            use_batch_norm=FIXED_BACKBONE["batch_norm"],
+            use_residual=FIXED_BACKBONE["residual"],
+        )
     parameter_count = int(model.count_params())
     if parameter_count != FIXED_BACKBONE["expected_parameters"]:
         raise RuntimeError(
@@ -251,12 +274,12 @@ def run_training_worker(args: argparse.Namespace) -> None:
             f"{FIXED_BACKBONE['expected_parameters']}, got {parameter_count}."
         )
 
-    if args.architecture == "conv1d":
-        X_train = X_train_flat.reshape(-1, 121, 1)
-        X_validation = X_validation_flat.reshape(-1, 121, 1)
-    else:
+    if args.architecture == "conv2d":
         X_train = X_train_flat.reshape(-1, 11, 11, 1)
         X_validation = X_validation_flat.reshape(-1, 11, 11, 1)
+    else:
+        X_train = X_train_flat.reshape(-1, 121, 1)
+        X_validation = X_validation_flat.reshape(-1, 121, 1)
     training_data = BalancedBatchSequence(
         X_train,
         y_train,
@@ -987,8 +1010,8 @@ def main(default_architecture: str = "conv2d") -> None:
     script_path = Path(__file__).resolve()
     parser = argparse.ArgumentParser(
         description=(
-            "Train balanced-batch Conv1D/Conv2D OOF models and tune rare-class score "
-            "scaling without KDDTest+."
+            "Train balanced-batch Conv1D, Conv2D, or Transformer OOF models and "
+            "tune rare-class score scaling without KDDTest+."
         )
     )
     add_arguments(parser, default_architecture)
@@ -1036,7 +1059,7 @@ def main(default_architecture: str = "conv2d") -> None:
         repo_root / "src" / "cnn_opt.py",
         repo_root / "src" / "cnn_gan_foc.py",
     ]
-    if args.architecture == "conv1d":
+    if args.architecture in {"conv1d", "transformer"}:
         training_dependency_paths.append(repo_root / "src" / "cnn_opt_1d_4gpu.py")
     required_paths = [script_path, *training_dependency_paths]
     missing_paths = [str(path) for path in required_paths if not path.is_file()]
@@ -1058,9 +1081,9 @@ def main(default_architecture: str = "conv2d") -> None:
         "architecture": args.architecture,
         "backbone": FIXED_BACKBONE,
         "input_representation": (
-            "121 semantically ordered features, shape (121, 1)"
-            if args.architecture == "conv1d"
-            else "121 semantically ordered features, shape (11, 11, 1)"
+            "121 semantically ordered features, shape (11, 11, 1)"
+            if args.architecture == "conv2d"
+            else "121 semantically ordered features, shape (121, 1)"
         ),
         "cb_beta": float(args.cb_beta),
         "focal_gamma": float(args.focal_gamma),
