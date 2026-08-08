@@ -43,6 +43,7 @@ ARCHITECTURE = "conv2d"
 ARCHITECTURE_LABELS = {
     "conv1d": "Conv1D",
     "conv2d": "Conv2D",
+    "mlp": "MLP",
     "transformer": "Transformer",
 }
 EXPERTS = ("general", "focal", "batching")
