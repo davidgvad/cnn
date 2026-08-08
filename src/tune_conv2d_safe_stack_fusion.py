@@ -1,4 +1,4 @@
-"""Tune Conv2D SAFE-Stack fusion from saved out-of-fold probabilities.
+"""Tune architecture-specific SAFE-Stack fusion from saved OOF probabilities.
 
 This script performs no neural-network training and never opens KDDTest+.
 It combines the matching four-fold OOF predictions produced by:
@@ -40,6 +40,10 @@ import run_no_ctgan_model_ablation_4gpu as core
 
 SCHEMA_VERSION = 1
 ARCHITECTURE = "conv2d"
+ARCHITECTURE_LABELS = {
+    "conv1d": "Conv1D",
+    "conv2d": "Conv2D",
+}
 EXPERTS = ("general", "focal", "batching")
 EXPERT_LABELS = {
     "general": "General (cross-entropy)",
@@ -157,9 +161,10 @@ def discover_standard_oof_paths(
     pointer_path: Path,
     seeds: Sequence[int],
     expected_training_mode: str,
+    expected_architecture: str = ARCHITECTURE,
 ) -> Dict[int, Path]:
     pointer = read_json(pointer_path)
-    if pointer.get("architecture") not in {None, ARCHITECTURE}:
+    if pointer.get("architecture") not in {None, expected_architecture}:
         raise ValueError(
             f"{pointer_path} belongs to architecture={pointer.get('architecture')!r}."
         )
@@ -178,8 +183,11 @@ def discover_standard_oof_paths(
             f"{pointer_path} uses training_mode={observed_mode!r}; expected "
             f"{expected_training_mode!r}."
         )
-    if training_settings.get("architecture") not in {None, ARCHITECTURE}:
-        raise ValueError(f"{protocol_path} is not a Conv2D protocol.")
+    if training_settings.get("architecture") not in {None, expected_architecture}:
+        raise ValueError(
+            f"{protocol_path} is not a "
+            f"{ARCHITECTURE_LABELS[expected_architecture]} protocol."
+        )
     if protocol.get("kddtest_accessed") not in {None, False}:
         raise ValueError(f"{protocol_path} reports KDDTest+ access.")
     directory = resolve_recorded_path(
@@ -202,8 +210,13 @@ def discover_focal_oof_paths(
     repo_root: Path,
     pointer_path: Path,
     seeds: Sequence[int],
+    expected_architecture: str = ARCHITECTURE,
 ) -> tuple[Dict[int, Path], Dict[str, Any]]:
     pointer = read_json(pointer_path)
+    if pointer.get("architecture") not in {None, expected_architecture}:
+        raise ValueError(
+            f"{pointer_path} belongs to architecture={pointer.get('architecture')!r}."
+        )
     for key in ("best_config", "oof_directory"):
         if key not in pointer:
             raise KeyError(f"Missing {key} in {pointer_path}.")
@@ -218,8 +231,11 @@ def discover_focal_oof_paths(
     )
     protocol = read_json(protocol_path)
     settings = protocol.get("settings", {})
-    if settings.get("model") not in {None, "Conv2D"}:
-        raise ValueError(f"{protocol_path} is not a Conv2D focal protocol.")
+    expected_model = ARCHITECTURE_LABELS[expected_architecture]
+    if settings.get("model") not in {None, expected_model}:
+        raise ValueError(
+            f"{protocol_path} is not a {expected_model} focal protocol."
+        )
     if settings.get("batching") not in {None, "ordinary_shuffled"}:
         raise ValueError(
             f"{protocol_path} is not the ordinary-batch focal experiment."
@@ -842,22 +858,38 @@ def build_reference_ablation(
     return per_seed, summary
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+def parse_args(
+    argv: Sequence[str] | None = None,
+    default_architecture: str = ARCHITECTURE,
+) -> argparse.Namespace:
+    architecture = str(default_architecture).strip().lower()
+    if architecture not in ARCHITECTURE_LABELS:
+        raise ValueError(f"Unsupported SAFE-Stack architecture: {architecture!r}")
+    architecture_label = ARCHITECTURE_LABELS[architecture]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--general-latest",
-        default="results/conv2d_baseline_cv_latest.json",
-        help="Latest-results JSON for Conv2D cross-entropy/ordinary batches.",
+        default=f"results/{architecture}_baseline_cv_latest.json",
+        help=(
+            f"Latest-results JSON for {architecture_label} "
+            "cross-entropy/ordinary batches."
+        ),
     )
     parser.add_argument(
         "--focal-latest",
-        default="results/conv2d_focal_stage1_latest.json",
-        help="Latest-results JSON for the Conv2D focal-only Stage-1 sweep.",
+        default=f"results/{architecture}_focal_stage1_latest.json",
+        help=(
+            f"Latest-results JSON for the {architecture_label} "
+            "focal-only Stage-1 sweep."
+        ),
     )
     parser.add_argument(
         "--batching-latest",
-        default="results/conv2d_batch_baseline_cv_latest.json",
-        help="Latest-results JSON for Conv2D cross-entropy/minority batches.",
+        default=f"results/{architecture}_batch_baseline_cv_latest.json",
+        help=(
+            f"Latest-results JSON for {architecture_label} "
+            "cross-entropy/minority batches."
+        ),
     )
     parser.add_argument("--seeds", type=int, nargs="+", default=list(DEFAULT_SEEDS))
     parser.add_argument(
@@ -883,7 +915,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--top-n", type=int, default=30)
     parser.add_argument(
-        "--output-prefix", default="conv2d_safe_stack_fusion"
+        "--output-prefix", default=f"{architecture}_safe_stack_fusion"
     )
     parser.add_argument(
         "--dry-run",
@@ -901,11 +933,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--top-n must be positive.")
     if not args.output_prefix.strip():
         parser.error("--output-prefix cannot be empty.")
+    args.architecture = architecture
     return args
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    args = parse_args(argv)
+def main(
+    argv: Sequence[str] | None = None,
+    default_architecture: str = ARCHITECTURE,
+) -> None:
+    args = parse_args(argv, default_architecture=default_architecture)
+    architecture = str(args.architecture)
+    architecture_label = ARCHITECTURE_LABELS[architecture]
     script_path = Path(__file__).resolve()
     repo_root = script_path.parents[1]
     results_dir = repo_root / "results"
@@ -922,16 +960,21 @@ def main(argv: Sequence[str] | None = None) -> None:
             latest_paths["general"],
             seeds,
             expected_training_mode="baseline_ce",
+            expected_architecture=architecture,
         ),
         "batching": discover_standard_oof_paths(
             repo_root,
             latest_paths["batching"],
             seeds,
             expected_training_mode="baseline_batch",
+            expected_architecture=architecture,
         ),
     }
     focal_paths, focal_best = discover_focal_oof_paths(
-        repo_root, latest_paths["focal"], seeds
+        repo_root,
+        latest_paths["focal"],
+        seeds,
+        expected_architecture=architecture,
     )
     source_paths = {**standard_paths, "focal": focal_paths}
     artifacts: Dict[str, Dict[int, OOFArtifact]] = {
@@ -953,7 +996,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     expert_per_seed, base_selection = expert_seed_metrics(artifacts, seeds)
     base_expert = str(base_selection.iloc[0]["expert"])
     base_index = EXPERTS.index(base_expert)
-    print("Conv2D SAFE-Stack OOF fusion search")
+    print(f"{architecture_label} SAFE-Stack OOF fusion search")
     print(f"Seeds: {seeds}; matched folds per seed: 4")
     print(f"Selected base: {EXPERT_LABELS[base_expert]}")
     print(
@@ -1016,7 +1059,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
     settings = {
         "schema_version": SCHEMA_VERSION,
-        "architecture": ARCHITECTURE,
+        "architecture": architecture,
         "seeds": seeds,
         "fold_count": 4,
         "base_selection_rule": (
@@ -1162,7 +1205,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     core.atomic_csv(ablation_summary_path, ablation_summary)
     latest = {
         "schema_version": SCHEMA_VERSION,
-        "architecture": ARCHITECTURE,
+        "architecture": architecture,
         "experiment_key": experiment_key,
         "protocol": str(protocol_path),
         "expert_seed_metrics": str(expert_seed_path),
@@ -1177,7 +1220,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
     core.atomic_json(latest_path, latest)
 
-    print("\n=== Ranked Conv2D SAFE-Stack configurations ===")
+    print(f"\n=== Ranked {architecture_label} SAFE-Stack configurations ===")
     print(pretty.to_string(index=False))
     print("\nSelected configuration:")
     print(f"  Base: {EXPERT_LABELS[base_expert]}")
