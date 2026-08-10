@@ -836,7 +836,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         survivors, details = validation_survivors(
             ranking, standalone_summary, args.tolerance
         )
-        survivors.insert(0, "architecture", architecture)
+        if "architecture" in survivors.columns:
+            observed_architectures = set(survivors["architecture"].astype(str))
+            if observed_architectures != {architecture}:
+                raise ValueError(
+                    f"{ranking_path} survivors contain architectures "
+                    f"{sorted(observed_architectures)}; expected {architecture}."
+                )
+        else:
+            survivors.insert(0, "architecture", architecture)
         survivors_by_architecture[architecture] = survivors
         validation_details[architecture] = details
         ranking_identity[architecture] = {

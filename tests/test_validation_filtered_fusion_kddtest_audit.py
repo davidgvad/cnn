@@ -87,6 +87,24 @@ class ValidationFilteredFusionAuditTests(unittest.TestCase):
         self.assertEqual(details["best_method"], "batching")
         self.assertAlmostEqual(details["threshold"], 0.635)
 
+    def test_validation_survivors_preserve_ranking_architecture_column(self) -> None:
+        ranking = pd.DataFrame(
+            [
+                {
+                    "architecture": "conv2d",
+                    "candidate_id": "fixed_average",
+                    "family": "fixed",
+                    "valid_all_seeds": True,
+                    "rare_f1_mean": 0.64,
+                    "rare_f1_std": 0.01,
+                }
+            ]
+        )
+        survivors, _ = audit.validation_survivors(
+            ranking, self.standalone_summary(), 0.005
+        )
+        self.assertEqual(survivors["architecture"].tolist(), ["conv2d"])
+
     def test_frozen_scaling_is_applied_to_general_probabilities(self) -> None:
         labels = np.asarray([0, 2, 3, 4, 1], dtype=np.int64)
         probabilities_by_seed = {}
