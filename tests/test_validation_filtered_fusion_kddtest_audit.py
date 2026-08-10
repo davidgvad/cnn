@@ -243,6 +243,12 @@ class ValidationFilteredFusionAuditTests(unittest.TestCase):
         self.assertEqual(len(tasks), 3)
         self.assertEqual({task["seed"] for task in tasks}, {0, 1, 2})
         self.assertTrue(all(len(task["candidates"]) == 2 for task in tasks))
+        self.assertTrue(all(task["planned_fit_count"] == 2 for task in tasks))
+
+    def test_progress_message_reports_architecture_and_overall_percentages(self) -> None:
+        message = audit.progress_message("Conv2D", 100, 400, 250, 1000)
+        self.assertIn("Conv2D refit progress: 100/400 (25.0%)", message)
+        self.assertIn("overall: 250/1,000 (25.0%)", message)
 
     def test_direct_stack_worker_refits_once_per_q_c_and_scores_all_rules(self) -> None:
         rng = np.random.default_rng(33)

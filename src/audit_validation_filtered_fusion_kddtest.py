@@ -552,6 +552,9 @@ def stack_tasks(survivors: pd.DataFrame, seeds: Sequence[int]) -> list[Dict[str,
         ["calibration", "feature_set"], sort=True
     ):
         records = group[task_columns].to_dict(orient="records")
+        planned_fit_count = int(
+            group[["q", "C"]].drop_duplicates().shape[0]
+        )
         for seed in seeds:
             tasks.append(
                 {
@@ -559,9 +562,32 @@ def stack_tasks(survivors: pd.DataFrame, seeds: Sequence[int]) -> list[Dict[str,
                     "feature_set": str(feature_set),
                     "seed": int(seed),
                     "candidates": records,
+                    "planned_fit_count": planned_fit_count,
                 }
             )
     return tasks
+
+
+def progress_message(
+    architecture_label: str,
+    architecture_completed: int,
+    architecture_total: int,
+    overall_completed: int,
+    overall_total: int,
+) -> str:
+    architecture_percent = (
+        100.0 * architecture_completed / architecture_total
+        if architecture_total
+        else 100.0
+    )
+    overall_percent = (
+        100.0 * overall_completed / overall_total if overall_total else 100.0
+    )
+    return (
+        f"{architecture_label} refit progress: {architecture_completed:,}/"
+        f"{architecture_total:,} ({architecture_percent:.1f}%); overall: "
+        f"{overall_completed:,}/{overall_total:,} ({overall_percent:.1f}%)"
+    )
 
 
 def task_fingerprint(
@@ -875,6 +901,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             f"{100.0 * details['threshold']:.2f}%; survivors="
             f"{details['survivor_count']:,}; unique logistic cores={core_count:,}"
         )
+    total_planned_refits = sum(
+        int(task["planned_fit_count"])
+        for architecture in architectures
+        for task in stack_tasks(survivors_by_architecture[architecture], seeds)
+    )
+    print(f"Planned full-OOF logistic refits: {total_planned_refits:,}")
     print("KDDTest+ arrays accessed: NO" if args.dry_run else "KDDTest+ arrays accessed: pending")
     if args.dry_run:
         print(
@@ -980,6 +1012,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     architecture_rows: list[Dict[str, Any]] = []
 
     global _AUDIT_CONTEXT
+    overall_completed_refits = 0
     for architecture in architectures:
         print(f"\n=== {stack.ARCHITECTURE_LABELS[architecture]} ===", flush=True)
         architecture_input = input_by_architecture[architecture]
@@ -1026,6 +1059,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 all_candidate_seed_rows.append(scored)
 
         tasks = stack_tasks(survivors, seeds)
+        architecture_total_refits = sum(
+            int(task["planned_fit_count"]) for task in tasks
+        )
         for task in tasks:
             fingerprint = task_fingerprint(task, architecture, experiment_key)
             task["fingerprint"] = fingerprint
@@ -1044,6 +1080,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         }
         task_results: list[Dict[str, Any]] = []
         pending_tasks: list[Dict[str, Any]] = []
+        architecture_completed_refits = 0
         for task in tasks:
             cached = None
             if not args.rerun:
@@ -1054,6 +1091,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 pending_tasks.append(task)
             else:
                 task_results.append(cached)
+                architecture_completed_refits += int(task["planned_fit_count"])
+                overall_completed_refits += int(task["planned_fit_count"])
         print(
             f"Stack refit/scoring tasks: {len(tasks)} total, "
             f"{len(task_results)} resumed, {len(pending_tasks)} pending; workers="
@@ -1061,6 +1100,19 @@ def main(argv: Sequence[str] | None = None) -> None:
             f"{args.threads_per_worker}",
             flush=True,
         )
+        if architecture_completed_refits:
+            print(
+                "  "
+                + progress_message(
+                    stack.ARCHITECTURE_LABELS[architecture],
+                    architecture_completed_refits,
+                    architecture_total_refits,
+                    overall_completed_refits,
+                    total_planned_refits,
+                )
+                + " [resumed]",
+                flush=True,
+            )
         if pending_tasks and args.workers == 1:
             _worker_initializer(args.threads_per_worker)
             for index, task in enumerate(pending_tasks, start=1):
@@ -1069,7 +1121,19 @@ def main(argv: Sequence[str] | None = None) -> None:
                     Path(task["cache_path"]), str(task["fingerprint"]), result
                 )
                 task_results.append(result)
-                print(f"  [{index}/{len(pending_tasks)}] completed", flush=True)
+                architecture_completed_refits += int(task["planned_fit_count"])
+                overall_completed_refits += int(task["planned_fit_count"])
+                print(
+                    f"  [{index}/{len(pending_tasks)} tasks] "
+                    + progress_message(
+                        stack.ARCHITECTURE_LABELS[architecture],
+                        architecture_completed_refits,
+                        architecture_total_refits,
+                        overall_completed_refits,
+                        total_planned_refits,
+                    ),
+                    flush=True,
+                )
         elif pending_tasks:
             context = mp.get_context("fork")
             with ProcessPoolExecutor(
@@ -1089,7 +1153,21 @@ def main(argv: Sequence[str] | None = None) -> None:
                         Path(task["cache_path"]), str(task["fingerprint"]), result
                     )
                     task_results.append(result)
-                    print(f"  [{index}/{len(pending_tasks)}] completed", flush=True)
+                    architecture_completed_refits += int(
+                        task["planned_fit_count"]
+                    )
+                    overall_completed_refits += int(task["planned_fit_count"])
+                    print(
+                        f"  [{index}/{len(pending_tasks)} tasks] "
+                        + progress_message(
+                            stack.ARCHITECTURE_LABELS[architecture],
+                            architecture_completed_refits,
+                            architecture_total_refits,
+                            overall_completed_refits,
+                            total_planned_refits,
+                        ),
+                        flush=True,
+                    )
         for result in task_results:
             if result["rows"]:
                 frame = pd.DataFrame(result["rows"])
