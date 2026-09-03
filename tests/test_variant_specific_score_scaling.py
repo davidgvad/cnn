@@ -86,6 +86,70 @@ class VariantSpecificScoreScalingTests(unittest.TestCase):
             self.assertEqual(metadata["config_id"], "b0p99_g0p5")
             self.assertTrue(all(path.is_file() for path in paths.values()))
 
+    def test_legacy_focal_batch_protocol_is_identified_from_recorded_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            results_dir = repo_root / "results"
+            oof_dir = results_dir / "conv2d_balanced_score_scaling_example_oof"
+            labels = np.tile(np.arange(5, dtype=np.int64), 4)
+            probabilities = np.full((len(labels), 5), 0.025, dtype=np.float64)
+            probabilities[np.arange(len(labels)), labels] = 0.90
+            probabilities /= probabilities.sum(axis=1, keepdims=True)
+            for seed in subject.SEEDS:
+                self.write_oof(
+                    oof_dir / f"seed_{seed}_oof_probabilities.npz",
+                    labels,
+                    probabilities,
+                )
+
+            protocol_path = results_dir / "legacy_focal_batch_protocol.json"
+            pointer_path = results_dir / "conv2d_balanced_score_scaling_latest.json"
+            core.atomic_json(
+                protocol_path,
+                {
+                    "kddtest_accessed": False,
+                    "training_settings": {
+                        "model": "Conv2D",
+                        "cb_beta": 0.99,
+                        "focal_gamma": 0.5,
+                        "batching": "minority_guaranteed_with_replacement",
+                        "minority_per_batch": 1,
+                    },
+                },
+            )
+            core.atomic_json(
+                pointer_path,
+                {
+                    "protocol": str(protocol_path),
+                    "oof_directory": str(oof_dir),
+                },
+            )
+
+            paths, metadata = subject.load_oof_paths(
+                repo_root,
+                results_dir,
+                "conv2d",
+                "focal_batch",
+                subject.SEEDS,
+            )
+            self.assertEqual(set(paths), set(subject.SEEDS))
+            self.assertEqual(
+                metadata["training_mode_evidence"],
+                "legacy_focal_batch_fields",
+            )
+
+            protocol = core.read_json(protocol_path)
+            del protocol["training_settings"]["focal_gamma"]
+            core.atomic_json(protocol_path, protocol)
+            with self.assertRaisesRegex(ValueError, "focal/batching fields"):
+                subject.load_oof_paths(
+                    repo_root,
+                    results_dir,
+                    "conv2d",
+                    "focal_batch",
+                    subject.SEEDS,
+                )
+
     def test_probability_artifact_validation_and_score_application(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "seed_0_oof_probabilities.npz"

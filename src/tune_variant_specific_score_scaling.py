@@ -174,6 +174,101 @@ def find_latest_pointer(
     )
 
 
+def validate_simple_training_protocol(
+    protocol: Mapping[str, Any],
+    protocol_path: Path,
+    pointer_path: Path,
+    architecture: str,
+    base_training: str,
+) -> str:
+    """Validate current protocols and the original focal+batch protocol schema.
+
+    The first balanced score-scaling runs predate the explicit ``architecture``
+    and ``training_mode`` fields.  Those protocols still record enough direct
+    evidence to identify the regime: model name, focal hyperparameters,
+    minority-guaranteed batching, and a positive minority quota.  Accept that
+    narrow legacy case while continuing to reject ambiguous metadata.
+    """
+    settings = protocol.get("training_settings")
+    if not isinstance(settings, Mapping):
+        raise ValueError(
+            f"OOF protocol has no training_settings object: {protocol_path}"
+        )
+
+    expected_model = ARCHITECTURE_LABELS[architecture]
+    observed_architecture = settings.get("architecture")
+    observed_model = settings.get("model")
+    if observed_architecture is not None and observed_architecture != architecture:
+        raise ValueError(
+            f"OOF protocol/architecture mismatch for {architecture}: "
+            f"{protocol_path}"
+        )
+    if observed_model is not None and observed_model != expected_model:
+        raise ValueError(
+            f"OOF protocol/model mismatch for {architecture}: {protocol_path}"
+        )
+    if observed_architecture is None and observed_model is None:
+        raise ValueError(
+            f"OOF protocol does not identify its architecture: {protocol_path}"
+        )
+
+    expected_mode = SHARED_TRAINING_MODE[base_training]
+    observed_mode = settings.get("training_mode")
+    if observed_mode is not None:
+        if observed_mode != expected_mode:
+            raise ValueError(
+                f"OOF protocol/training-mode mismatch for {architecture}/"
+                f"{base_training}: expected {expected_mode}, got "
+                f"{observed_mode!r}."
+            )
+        return "explicit_training_mode"
+
+    # Only the original focal+batch score-scaling protocols are known to omit
+    # training_mode.  Bind this fallback to the focal+batch pointer names and
+    # require every remaining regime-defining field.
+    allowed_pointer_names = {
+        template.format(architecture=architecture)
+        for template in BASE_TRAINING["focal_batch"]["latest_names"]
+    }
+    if base_training != "focal_batch" or pointer_path.name not in allowed_pointer_names:
+        raise ValueError(
+            f"OOF protocol/training-mode mismatch for {architecture}/"
+            f"{base_training}: expected {expected_mode}, got None."
+        )
+
+    if observed_model != expected_model:
+        raise ValueError(
+            "Legacy focal+batch protocol must identify the exact model; "
+            f"expected {expected_model!r}, got {observed_model!r}: {protocol_path}"
+        )
+    if settings.get("batching") != "minority_guaranteed_with_replacement":
+        raise ValueError(
+            "Legacy focal+batch protocol lacks minority-guaranteed batching "
+            f"evidence: {protocol_path}"
+        )
+    try:
+        cb_beta = float(settings["cb_beta"])
+        focal_gamma = float(settings["focal_gamma"])
+        minority_per_batch = int(settings["minority_per_batch"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            "Legacy focal+batch protocol lacks valid focal/batching fields: "
+            f"{protocol_path}"
+        ) from error
+    if (
+        not np.isfinite(cb_beta)
+        or not 0.0 < cb_beta < 1.0
+        or not np.isfinite(focal_gamma)
+        or focal_gamma < 0.0
+        or minority_per_batch < 1
+    ):
+        raise ValueError(
+            "Legacy focal+batch protocol contains invalid focal/batching values: "
+            f"{protocol_path}"
+        )
+    return "legacy_focal_batch_fields"
+
+
 def load_oof_paths(
     repo_root: Path,
     results_dir: Path,
@@ -225,19 +320,13 @@ def load_oof_paths(
         if settings.get("batching") != "ordinary_shuffled":
             raise ValueError(f"Focal-only protocol uses unexpected batching: {protocol_path}")
     else:
-        settings = protocol.get("training_settings", {})
-        expected_mode = SHARED_TRAINING_MODE[base_training]
-        if settings.get("architecture") != architecture:
-            raise ValueError(
-                f"OOF protocol/architecture mismatch for {architecture}: "
-                f"{protocol_path}"
-            )
-        if settings.get("training_mode") != expected_mode:
-            raise ValueError(
-                f"OOF protocol/training-mode mismatch for {architecture}/"
-                f"{base_training}: expected {expected_mode}, got "
-                f"{settings.get('training_mode')!r}."
-            )
+        training_mode_evidence = validate_simple_training_protocol(
+            protocol,
+            protocol_path,
+            pointer_path,
+            architecture,
+            base_training,
+        )
 
     paths: Dict[int, Path] = {}
     for seed in seeds:
@@ -266,6 +355,11 @@ def load_oof_paths(
             core.sha256_file(best_path) if best_path is not None else None
         ),
         "config_id": config_id,
+        "training_mode_evidence": (
+            "focal_stage1_selected_configuration"
+            if layout == "focal_stage1"
+            else training_mode_evidence
+        ),
         "oof_files": {
             str(seed): {
                 "path": str(path),
