@@ -1,0 +1,157 @@
+{
+  "KDDTrain+": {
+    "rows": 125973,
+    "width_counts": {
+      "43": 125973
+    },
+    "class_counts": {
+      "normal": 67343,
+      "DoS": 45927,
+      "R2L": 995,
+      "Probe": 11656,
+      "U2R": 52
+    },
+    "subtype_counts": {
+      "normal": 67343,
+      "neptune": 41214,
+      "warezclient": 890,
+      "ipsweep": 3599,
+      "portsweep": 2931,
+      "teardrop": 892,
+      "nmap": 1493,
+      "satan": 3633,
+      "smurf": 2646,
+      "pod": 201,
+      "back": 956,
+      "guess_passwd": 53,
+      "ftp_write": 8,
+      "multihop": 7,
+      "rootkit": 10,
+      "buffer_overflow": 30,
+      "imap": 11,
+      "warezmaster": 20,
+      "phf": 4,
+      "land": 18,
+      "loadmodule": 9,
+      "spy": 2,
+      "perl": 3
+    },
+    "duplicate_feature_rows_beyond_first": 16,
+    "conflicting_raw_label_feature_groups": 15,
+    "sha256": "1b86d2f957b33082081bba410fe129b475efebcc13c9014c3f447c8271aadf95",
+    "conflicting_collapsed_class_feature_groups": 7,
+    "categorical_cardinalities": {
+      "1": 3,
+      "2": 70,
+      "3": 11
+    },
+    "nonfinite_numeric_values": 0,
+    "constant_raw_numeric_features": [
+      19
+    ]
+  },
+  "KDDTest+": {
+    "rows": 22544,
+    "width_counts": {
+      "43": 22544
+    },
+    "class_counts": {
+      "DoS": 7458,
+      "normal": 9711,
+      "Probe": 2421,
+      "R2L": 2887,
+      "U2R": 67
+    },
+    "subtype_counts": {
+      "neptune": 4657,
+      "normal": 9711,
+      "saint": 319,
+      "mscan": 996,
+      "guess_passwd": 1231,
+      "smurf": 665,
+      "apache2": 737,
+      "satan": 735,
+      "buffer_overflow": 20,
+      "back": 359,
+      "warezmaster": 944,
+      "snmpgetattack": 178,
+      "processtable": 685,
+      "pod": 41,
+      "httptunnel": 133,
+      "nmap": 73,
+      "ps": 15,
+      "snmpguess": 331,
+      "ipsweep": 141,
+      "mailbomb": 293,
+      "portsweep": 157,
+      "multihop": 18,
+      "named": 17,
+      "sendmail": 14,
+      "loadmodule": 2,
+      "xterm": 13,
+      "worm": 2,
+      "teardrop": 12,
+      "rootkit": 13,
+      "xlock": 9,
+      "perl": 2,
+      "land": 7,
+      "xsnoop": 4,
+      "sqlattack": 2,
+      "ftp_write": 3,
+      "imap": 1,
+      "udpstorm": 2,
+      "phf": 2
+    },
+    "duplicate_feature_rows_beyond_first": 57,
+    "conflicting_raw_label_feature_groups": 57,
+    "sha256": "fa46b0935342616aa83b7c2578db355b6a7aaabbc492248172c7a1e8b7ab8f84",
+    "conflicting_collapsed_class_feature_groups": 54,
+    "categorical_cardinalities": {
+      "1": 3,
+      "2": 64,
+      "3": 11
+    },
+    "nonfinite_numeric_values": 0,
+    "constant_raw_numeric_features": [
+      19
+    ]
+  },
+  "train_test_feature_overlap": {
+    "unique_vectors": 654,
+    "test_rows": 664,
+    "test_subtypes": {
+      "neptune": 155,
+      "normal": 105,
+      "pod": 21,
+      "ipsweep": 97,
+      "smurf": 203,
+      "back": 15,
+      "snmpgetattack": 28,
+      "portsweep": 18,
+      "satan": 8,
+      "saint": 7,
+      "warezmaster": 1,
+      "land": 3,
+      "teardrop": 3
+    }
+  },
+  "test_only_attack_subtypes": [
+    "apache2",
+    "httptunnel",
+    "mailbomb",
+    "mscan",
+    "named",
+    "processtable",
+    "ps",
+    "saint",
+    "sendmail",
+    "snmpgetattack",
+    "snmpguess",
+    "sqlattack",
+    "udpstorm",
+    "worm",
+    "xlock",
+    "xsnoop",
+    "xterm"
+  ]
+}

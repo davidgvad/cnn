@@ -9,13 +9,14 @@ Default experiment
 * Repetition: training seeds {0, 1, 2} on one frozen four-fold split.
 * Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.
 
-The four folds are assigned to four GPUs. For every beta/gamma/seed setting,
-GPU i trains on three folds and predicts fold i. The four predictions are then
+All four folds run across the configured CPU/GPU workers. For every
+beta/gamma/seed setting, each fit trains on three folds and predicts the fourth.
+The four predictions are then
 placed back in original row order to form one complete out-of-fold prediction
 vector. Metrics are calculated once on that vector for each seed, followed by
 mean and sample standard deviation across the three seeds.
 
-Each fit runs in a fresh subprocess with exactly one visible GPU. Completed
+Each fit runs in a fresh subprocess on CPU or exactly one visible GPU. Completed
 artifacts are validated and reused when the same command is rerun.
 """
 
@@ -38,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 import run_no_ctgan_model_ablation_4gpu as core
+import experiment_runtime as runtime
 
 
 SCHEMA_VERSION = 1
@@ -354,11 +356,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
 
     visible_gpus = tf.config.list_physical_devices("GPU")
-    if len(visible_gpus) != 1:
-        raise RuntimeError(
-            "Each worker must see exactly one GPU; TensorFlow sees "
-            f"{len(visible_gpus)}: {visible_gpus}."
-        )
+    runtime.validate_worker_devices(visible_gpus, allow_cpu=args.allow_cpu)
     for device in visible_gpus:
         try:
             tf.config.experimental.set_memory_growth(device, True)
@@ -489,6 +487,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "assigned_gpu": os.environ.get("EXPERIMENT_GPU_ID", ""),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "tensorflow_visible_gpu_count": len(visible_gpus),
+        "runtime_device": "cpu" if args.allow_cpu else "gpu",
         "deterministic_ops_requested": bool(args.deterministic_ops),
         "deterministic_ops_enabled": deterministic_enabled,
         "tensorflow_version": core.package_version("tensorflow"),
@@ -640,6 +639,8 @@ def build_worker_command(
         "--fit-verbose",
         str(args.fit_verbose),
     ]
+    if args.allow_cpu:
+        command.append("--allow-cpu")
     if args.deterministic_ops:
         command.append("--deterministic-ops")
     return command
@@ -847,12 +848,7 @@ def formatted_summary(summary: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--gpus",
-        nargs="+",
-        default=["0", "1", "2", "3"],
-        help="Exactly four GPU IDs, mapped in order to folds 1..4 (default: 0 1 2 3).",
-    )
+    runtime.add_arguments(parser)
     parser.add_argument(
         "--seeds",
         type=int,
@@ -990,7 +986,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script_path = Path(__file__).resolve()
     parser = argparse.ArgumentParser(
-        description=("Four-GPU, four-fold Conv2D focal beta/gamma tuning on KDDTrain+.")
+        description=("CPU/GPU, four-fold Conv2D focal beta/gamma tuning on KDDTrain+.")
     )
     add_arguments(parser)
     args = parser.parse_args()
@@ -1019,21 +1015,16 @@ def main() -> None:
         run_training_worker(args)
         return
 
-    try:
-        gpus = core.parse_gpus(args.gpus)
-    except ValueError as error:
-        parser.error(str(error))
-    if len(gpus) != FOLD_COUNT:
-        parser.error(
-            f"This runner maps one fold to each GPU and therefore requires "
-            f"exactly {FOLD_COUNT} GPU IDs."
-        )
+    runtime_config = runtime.configure_controller(args, parser)
+    gpus = list(runtime_config.workers)
+    cuda_tokens = runtime_config.cuda_tokens
 
-    train_path = repo_root / "data" / "KDDTrain+.txt"
+    train_path = runtime.data_directory(args, repo_root) / "KDDTrain+.txt"
     required_paths = [
         train_path,
         script_path,
         repo_root / "src" / "run_no_ctgan_model_ablation_4gpu.py",
+        repo_root / "src" / "experiment_runtime.py",
         repo_root / "src" / "cnn_opt.py",
         repo_root / "src" / "cnn_gan_foc.py",
     ]
@@ -1085,7 +1076,7 @@ def main() -> None:
     experiment_key = stable_hash(identity, 12)
     prefix = args.name_prefix.strip()
     stem = f"{prefix}_{experiment_key}"
-    results_dir = repo_root / "results"
+    results_dir = runtime.results_directory(args, repo_root)
     run_dir = results_dir / f"{stem}_runs"
     log_dir = results_dir / f"{stem}_logs"
     cache_dir = results_dir / f"{stem}_fold_cache"
@@ -1116,7 +1107,7 @@ def main() -> None:
                         "seed": int(seed),
                         "fold_id": fold_id,
                         "fold_number": fold_id + 1,
-                        "assigned_gpu": gpus[fold_id],
+                        "assigned_gpu": gpus[len(plans) % len(gpus)],
                         "deterministic_ops_requested": bool(args.deterministic_ops),
                         "run_name": run_name,
                         "train_indices_sha256": fold["train_indices_sha256"],
@@ -1141,7 +1132,7 @@ def main() -> None:
 
     print("Conv2D focal-loss Stage-1 sweep")
     print(f"Experiment key: {experiment_key}")
-    print(f"GPUs (fold 1..4): {gpus}")
+    print(f"Execution workers: {gpus}; four folds queued across these workers")
     print(f"Betas: {args.betas}")
     print(f"Focal gammas: {args.focal_gammas}")
     print(f"Training seeds: {args.seeds}")
@@ -1207,6 +1198,10 @@ def main() -> None:
         "schema_version": SCHEMA_VERSION,
         "experiment_key": experiment_key,
         "title": "Conv2D class-balanced focal-loss four-fold tuning",
+        "runtime_gpu_workers": gpus,
+        "runtime": runtime_config.metadata(),
+        "runtime_cuda_mapping": cuda_tokens,
+        "parallel_worker_count": len(gpus),
         "source_and_data_fingerprint": source_fingerprint,
         "kddtrain_sha256": core.sha256_file(train_path),
         "kddtest_accessed": False,
@@ -1269,9 +1264,9 @@ def main() -> None:
         else:
             pending_plans.append(plan)
     completed_counter = len(plans) - len(pending_plans)
-    plans_by_fold = {
-        fold_id: [plan for plan in pending_plans if int(plan["fold_id"]) == fold_id]
-        for fold_id in range(FOLD_COUNT)
+    plans_by_gpu = {
+        gpu: [plan for plan in pending_plans if plan["assigned_gpu"] == gpu]
+        for gpu in gpus
     }
     if completed_counter:
         print(
@@ -1296,7 +1291,7 @@ def main() -> None:
         ).hexdigest()[:16]
         command = build_worker_command(script_path, plan, args, attempt_id)
         environment = os.environ.copy()
-        environment["CUDA_VISIBLE_DEVICES"] = gpu
+        environment["CUDA_VISIBLE_DEVICES"] = cuda_tokens[gpu]
         environment["EXPERIMENT_GPU_ID"] = gpu
         environment["PYTHONHASHSEED"] = str(plan["seed"])
         environment["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
@@ -1341,9 +1336,10 @@ def main() -> None:
                 f"{run_name}: controller error={error!r}, log={log_path}",
             )
 
-    def gpu_worker(gpu: str, fold_id: int) -> None:
+    def gpu_worker(gpu: str) -> None:
         nonlocal completed_counter
-        for plan in plans_by_fold[fold_id]:
+        for plan in plans_by_gpu[gpu]:
+            fold_id = int(plan["fold_id"])
             if stop_event.is_set():
                 return
             run_name = str(plan["run_name"])
@@ -1371,11 +1367,8 @@ def main() -> None:
                     flush=True,
                 )
 
-    with ThreadPoolExecutor(max_workers=FOLD_COUNT) as executor:
-        futures = [
-            executor.submit(gpu_worker, gpus[fold_id], fold_id)
-            for fold_id in range(FOLD_COUNT)
-        ]
+    with ThreadPoolExecutor(max_workers=len(gpus)) as executor:
+        futures = [executor.submit(gpu_worker, gpu) for gpu in gpus]
         for future in futures:
             future.result()
 

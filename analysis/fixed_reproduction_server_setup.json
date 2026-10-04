@@ -1,0 +1,25 @@
+{
+  "remote_tools": "/home/gvadzabd/cnn/analysis/fixed_parameter_reproduction_20261003_2d17e4d4",
+  "workspace": "/home/gvadzabd/cnn_fixed_reproduction_01",
+  "file_sha256": {
+    "reproduce_fixed_parameters.sh": "85a2bb63ce1b2ddf79fa3d653205318916840364caf01c6959fc8a1134a9a66c",
+    "export_fixed_parameter_tables.py": "8dd0e98bb9fd9126b22fb6a0600ab623975bceeea8144b003ef72f298a157c01",
+    "reverify_paper_results.py": "61741cf1a325dd70cbb8a1630df7d3fb3024d82e85307eadf74e1f4cc3e20291",
+    "adapt_reproduction_gpu_workers.py": "7f173412f9cbff360589a07e7a0cfc3f2e42eea13a836a68c1240b4b463424fd"
+  },
+  "training_launched": false,
+  "preflight_complete": true,
+  "local_preflight_directory": "/Users/davidg/Documents/temp/cnn/analysis/fixed_reproduction_preflight",
+  "cpu_workspace": "/home/gvadzabd/cnn_fixed_reproduction_cpu_01",
+  "gpu_default_ids": [
+    "0",
+    "1"
+  ],
+  "gpu_worker_range": [
+    1,
+    4
+  ],
+  "hardware_preflight_complete": true,
+  "hardware_preflight_file": "/Users/davidg/Documents/temp/cnn/analysis/fixed_reproduction_preflight/hardware_preflight.json",
+  "original_source_unchanged": true
+}

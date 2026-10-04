@@ -1,0 +1,223 @@
+--- original/tune_conv2d_focal_cv_4gpu.py
++++ copied/tune_conv2d_focal_cv_4gpu.py
+@@ -59,6 +59,20 @@
+ }
+ 
+ METRICS = list(core.METRICS)
++
++
++def resolve_reproduction_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
++    """Resolve logical worker IDs within a parent CUDA allocation."""
++    if os.environ.get("REPRO_ALLOW_CPU") == "1":
++        return {gpu: "" for gpu in gpus}
++    allocated = [token.strip() for token in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",") if token.strip()]
++    try:
++        indices = [int(gpu) for gpu in gpus]
++    except ValueError:
++        return {gpu: gpu for gpu in gpus}
++    if allocated and all(0 <= i < len(allocated) for i in indices):
++        return {gpu: allocated[i] for gpu, i in zip(gpus, indices, strict=True)}
++    return {gpu: gpu for gpu in gpus}
+ 
+ 
+ def stable_hash(value: Any, length: int = 12) -> str:
+@@ -354,7 +368,9 @@
+         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
+ 
+     visible_gpus = tf.config.list_physical_devices("GPU")
+-    if len(visible_gpus) != 1:
++    if len(visible_gpus) != 1 and not (
++        os.environ.get("REPRO_ALLOW_CPU") == "1" and len(visible_gpus) == 0
++    ):
+         raise RuntimeError(
+             "Each worker must see exactly one GPU; TensorFlow sees "
+             f"{len(visible_gpus)}: {visible_gpus}."
+@@ -851,7 +867,7 @@
+         "--gpus",
+         nargs="+",
+         default=["0", "1", "2", "3"],
+-        help="Exactly four GPU IDs, mapped in order to folds 1..4 (default: 0 1 2 3).",
++        help="One to four GPU workers; all four folds run serially per assigned GPU.",
+     )
+     parser.add_argument(
+         "--seeds",
+@@ -1023,11 +1039,9 @@
+         gpus = core.parse_gpus(args.gpus)
+     except ValueError as error:
+         parser.error(str(error))
+-    if len(gpus) != FOLD_COUNT:
+-        parser.error(
+-            f"This runner maps one fold to each GPU and therefore requires "
+-            f"exactly {FOLD_COUNT} GPU IDs."
+-        )
++    if len(gpus) > FOLD_COUNT:
++        parser.error(f"At most {FOLD_COUNT} GPU workers are supported.")
++    cuda_tokens = resolve_reproduction_cuda_tokens(gpus)
+ 
+     train_path = repo_root / "data" / "KDDTrain+.txt"
+     required_paths = [
+@@ -1116,7 +1130,7 @@
+                         "seed": int(seed),
+                         "fold_id": fold_id,
+                         "fold_number": fold_id + 1,
+-                        "assigned_gpu": gpus[fold_id],
++                        "assigned_gpu": gpus[fold_id % len(gpus)],
+                         "deterministic_ops_requested": bool(args.deterministic_ops),
+                         "run_name": run_name,
+                         "train_indices_sha256": fold["train_indices_sha256"],
+@@ -1141,7 +1155,7 @@
+ 
+     print("Conv2D focal-loss Stage-1 sweep")
+     print(f"Experiment key: {experiment_key}")
+-    print(f"GPUs (fold 1..4): {gpus}")
++    print(f"GPU workers: {gpus}; four folds queued across these workers")
+     print(f"Betas: {args.betas}")
+     print(f"Focal gammas: {args.focal_gammas}")
+     print(f"Training seeds: {args.seeds}")
+@@ -1207,6 +1221,9 @@
+         "schema_version": SCHEMA_VERSION,
+         "experiment_key": experiment_key,
+         "title": "Conv2D class-balanced focal-loss four-fold tuning",
++        "runtime_gpu_workers": gpus,
++        "runtime_cuda_mapping": cuda_tokens,
++        "parallel_worker_count": len(gpus),
+         "source_and_data_fingerprint": source_fingerprint,
+         "kddtrain_sha256": core.sha256_file(train_path),
+         "kddtest_accessed": False,
+@@ -1269,9 +1286,9 @@
+         else:
+             pending_plans.append(plan)
+     completed_counter = len(plans) - len(pending_plans)
+-    plans_by_fold = {
+-        fold_id: [plan for plan in pending_plans if int(plan["fold_id"]) == fold_id]
+-        for fold_id in range(FOLD_COUNT)
++    plans_by_gpu = {
++        gpu: [plan for plan in pending_plans if plan["assigned_gpu"] == gpu]
++        for gpu in gpus
+     }
+     if completed_counter:
+         print(
+@@ -1296,7 +1313,7 @@
+         ).hexdigest()[:16]
+         command = build_worker_command(script_path, plan, args, attempt_id)
+         environment = os.environ.copy()
+-        environment["CUDA_VISIBLE_DEVICES"] = gpu
++        environment["CUDA_VISIBLE_DEVICES"] = cuda_tokens[gpu]
+         environment["EXPERIMENT_GPU_ID"] = gpu
+         environment["PYTHONHASHSEED"] = str(plan["seed"])
+         environment["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+@@ -1341,9 +1358,10 @@
+                 f"{run_name}: controller error={error!r}, log={log_path}",
+             )
+ 
+-    def gpu_worker(gpu: str, fold_id: int) -> None:
++    def gpu_worker(gpu: str) -> None:
+         nonlocal completed_counter
+-        for plan in plans_by_fold[fold_id]:
++        for plan in plans_by_gpu[gpu]:
++            fold_id = int(plan["fold_id"])
+             if stop_event.is_set():
+                 return
+             run_name = str(plan["run_name"])
+@@ -1371,11 +1389,8 @@
+                     flush=True,
+                 )
+ 
+-    with ThreadPoolExecutor(max_workers=FOLD_COUNT) as executor:
+-        futures = [
+-            executor.submit(gpu_worker, gpus[fold_id], fold_id)
+-            for fold_id in range(FOLD_COUNT)
+-        ]
++    with ThreadPoolExecutor(max_workers=len(gpus)) as executor:
++        futures = [executor.submit(gpu_worker, gpu) for gpu in gpus]
+         for future in futures:
+             future.result()
+ 
+--- original/tune_conv1d_focal_cv_4gpu.py
++++ copied/tune_conv1d_focal_cv_4gpu.py
+@@ -89,6 +89,8 @@
+ 
+ def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
+     """Map logical worker IDs onto an optional parent CUDA allocation."""
++    if os.environ.get("REPRO_ALLOW_CPU") == "1":
++        return {gpu: "" for gpu in gpus}
+     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+     allocated_tokens = [token.strip() for token in visible.split(",") if token.strip()]
+     logical_indices: List[int] = []
+@@ -384,7 +386,9 @@
+         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
+ 
+     visible_gpus = tf.config.list_physical_devices("GPU")
+-    if len(visible_gpus) != 1:
++    if len(visible_gpus) != 1 and not (
++        os.environ.get("REPRO_ALLOW_CPU") == "1" and len(visible_gpus) == 0
++    ):
+         raise RuntimeError(
+             "Each worker must see exactly one GPU; TensorFlow sees "
+             f"{len(visible_gpus)}: {visible_gpus}."
+--- original/tune_transformer_focal_cv_4gpu.py
++++ copied/tune_transformer_focal_cv_4gpu.py
+@@ -89,6 +89,8 @@
+ 
+ def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
+     """Map logical worker IDs onto an optional parent CUDA allocation."""
++    if os.environ.get("REPRO_ALLOW_CPU") == "1":
++        return {gpu: "" for gpu in gpus}
+     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+     allocated_tokens = [token.strip() for token in visible.split(",") if token.strip()]
+     logical_indices: List[int] = []
+@@ -384,7 +386,9 @@
+         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
+ 
+     visible_gpus = tf.config.list_physical_devices("GPU")
+-    if len(visible_gpus) != 1:
++    if len(visible_gpus) != 1 and not (
++        os.environ.get("REPRO_ALLOW_CPU") == "1" and len(visible_gpus) == 0
++    ):
+         raise RuntimeError(
+             "Each worker must see exactly one GPU; TensorFlow sees "
+             f"{len(visible_gpus)}: {visible_gpus}."
+--- original/tune_mlp_focal_cv_4gpu.py
++++ copied/tune_mlp_focal_cv_4gpu.py
+@@ -82,6 +82,8 @@
+ 
+ def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
+     """Map logical worker IDs onto Slurm's allocated CUDA device tokens."""
++    if os.environ.get("REPRO_ALLOW_CPU") == "1":
++        return {gpu: "" for gpu in gpus}
+     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+     allocated_tokens = [token.strip() for token in visible.split(",") if token.strip()]
+     logical_indices: List[int] = []
+@@ -374,7 +376,9 @@
+         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
+ 
+     visible_gpus = tf.config.list_physical_devices("GPU")
+-    if len(visible_gpus) != 1:
++    if len(visible_gpus) != 1 and not (
++        os.environ.get("REPRO_ALLOW_CPU") == "1" and len(visible_gpus) == 0
++    ):
+         raise RuntimeError(
+             "Each worker must see exactly one GPU; TensorFlow sees "
+             f"{len(visible_gpus)}: {visible_gpus}."
+--- original/tune_conv2d_score_scaling_cv_4gpu.py
++++ copied/tune_conv2d_score_scaling_cv_4gpu.py
+@@ -161,6 +161,8 @@
+ 
+ def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
+     """Map logical worker IDs to tokens in a parent CUDA allocation."""
++    if os.environ.get("REPRO_ALLOW_CPU") == "1":
++        return {gpu: "" for gpu in gpus}
+     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+     tokens = [token.strip() for token in visible.split(",") if token.strip()]
+     try:
+@@ -272,7 +274,9 @@
+         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
+ 
+     visible_gpus = tf.config.list_physical_devices("GPU")
+-    if len(visible_gpus) != 1:
++    if len(visible_gpus) != 1 and not (
++        os.environ.get("REPRO_ALLOW_CPU") == "1" and len(visible_gpus) == 0
++    ):
+         raise RuntimeError(
+             "Each worker must see exactly one GPU; TensorFlow sees "
+             f"{len(visible_gpus)}: {visible_gpus}."

@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "experiment": "NSL-KDD 2x2x2 exposure/optimization/decision factorial",
+  "class_order": [
+    "DoS",
+    "Probe",
+    "R2L",
+    "U2R",
+    "Normal"
+  ],
+  "feature_count": 121,
+  "training": {
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "fold_count": 4,
+    "fold_seed": 0,
+    "epochs": 25,
+    "batch_size": 256,
+    "minority_per_batch_per_class": 1,
+    "deterministic_ops": false
+  },
+  "datasets": {
+    "KDDTrain+.txt": {
+      "sha256": "1b86d2f957b33082081bba410fe129b475efebcc13c9014c3f447c8271aadf95",
+      "rows": 125973
+    },
+    "KDDTest+.txt": {
+      "sha256": "fa46b0935342616aa83b7c2578db355b6a7aaabbc492248172c7a1e8b7ab8f84",
+      "rows": 22544
+    }
+  },
+  "architectures": {
+    "conv2d": {
+      "focal_beta": 0.99,
+      "focal_gamma": 0.5,
+      "parameters": 109381,
+      "score_scaling": {
+        "baseline": {
+          "r2l": 1.15,
+          "u2r": 0.7
+        },
+        "focal_only": {
+          "r2l": 1.0,
+          "u2r": 1.9
+        },
+        "batch_only": {
+          "r2l": 1.0,
+          "u2r": 10.0
+        },
+        "focal_batch": {
+          "r2l": 1.15,
+          "u2r": 8.0
+        }
+      }
+    },
+    "conv1d": {
+      "focal_beta": 0.99,
+      "focal_gamma": 0.25,
+      "parameters": 109797,
+      "score_scaling": {
+        "baseline": {
+          "r2l": 0.85,
+          "u2r": 0.4
+        },
+        "focal_only": {
+          "r2l": 0.7,
+          "u2r": 1.0
+        },
+        "batch_only": {
+          "r2l": 1.0,
+          "u2r": 1.75
+        },
+        "focal_batch": {
+          "r2l": 1.3,
+          "u2r": 8.0
+        }
+      }
+    },
+    "transformer": {
+      "focal_beta": 0.99,
+      "focal_gamma": 0.75,
+      "parameters": 110661,
+      "score_scaling": {
+        "baseline": {
+          "r2l": 0.85,
+          "u2r": 0.25
+        },
+        "focal_only": {
+          "r2l": 0.55,
+          "u2r": 1.9
+        },
+        "batch_only": {
+          "r2l": 1.3,
+          "u2r": 6.0
+        },
+        "focal_batch": {
+          "r2l": 1.0,
+          "u2r": 10.0
+        }
+      }
+    },
+    "mlp": {
+      "focal_beta": 0.99,
+      "focal_gamma": 0.25,
+      "parameters": 99845,
+      "score_scaling": {
+        "baseline": {
+          "r2l": 1.3,
+          "u2r": 0.25
+        },
+        "focal_only": {
+          "r2l": 1.0,
+          "u2r": 0.85
+        },
+        "batch_only": {
+          "r2l": 1.3,
+          "u2r": 7.0
+        },
+        "focal_batch": {
+          "r2l": 1.45,
+          "u2r": 4.5
+        }
+      }
+    }
+  },
+  "parameter_selection_source": {
+    "selection_id": "ea63ca7e718d",
+    "selection_manifest_sha256": "0c73f26079edf9f7cdd1d643551e63bcbb22d9f2d23b76e62aa18500e70da08f",
+    "parameters_fixed": true,
+    "selection_search_repeated": false
+  }
+}

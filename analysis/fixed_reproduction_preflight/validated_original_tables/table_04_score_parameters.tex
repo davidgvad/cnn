@@ -1,0 +1,27 @@
+\begin{table*}[t]
+\centering
+\caption{table 04 score parameters}
+\label{tab:score_parameters}
+\begin{tabular}{llll}
+\hline
+Backbone & Underlying training & k\_R2L & k\_U2R \\
+\hline
+Conv2D & Baseline & 1.15 & 0.70 \\
+Conv2D & Focal only & 1.00 & 1.90 \\
+Conv2D & Batching only & 1.00 & 10.00 \\
+Conv2D & Focal + batching & 1.15 & 8.00 \\
+Conv1D & Baseline & 0.85 & 0.40 \\
+Conv1D & Focal only & 0.70 & 1.00 \\
+Conv1D & Batching only & 1.00 & 1.75 \\
+Conv1D & Focal + batching & 1.30 & 8.00 \\
+Transformer & Baseline & 0.85 & 0.25 \\
+Transformer & Focal only & 0.55 & 1.90 \\
+Transformer & Batching only & 1.30 & 6.00 \\
+Transformer & Focal + batching & 1.00 & 10.00 \\
+MLP & Baseline & 1.30 & 0.25 \\
+MLP & Focal only & 1.00 & 0.85 \\
+MLP & Batching only & 1.30 & 7.00 \\
+MLP & Focal + batching & 1.45 & 4.50 \\
+\hline
+\end{tabular}
+\end{table*}

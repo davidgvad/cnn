@@ -1,0 +1,9 @@
+{
+  "explorer.decorations.colors": true,
+  "explorer.decorations.badges": true,
+  "git.decorations.enabled": true,
+  "workbench.colorCustomizations": {
+    "gitDecoration.untrackedResourceForeground": "#73C991",
+    "gitDecoration.addedResourceForeground": "#73C991"
+  }
+}

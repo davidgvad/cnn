@@ -1,0 +1,1101 @@
+{
+  "paper_sha256": "9ea3bcad10db05b45f6b599c4f51c393b90a5eb602dd5b971882306b129c2a68",
+  "paper_attachment": "/Users/davidg/.codex/attachments/18ee7d64-070e-4cc2-afc6-034180b1bd03/Pasted text.txt",
+  "original_server_repo": "/home/gvadzabd/cnn",
+  "selection_manifest": "results/variant_specific_scaling_selection_ea63ca7e718d.json",
+  "selection_sha256": "0c73f26079edf9f7cdd1d643551e63bcbb22d9f2d23b76e62aa18500e70da08f",
+  "evaluation_protocol": "results/variant_specific_scaling_kddtest_d5c1c2bb3050_protocol.json",
+  "evaluation_sha256": "cb292ebeece383a6d07c1896c9c10d2377b2ba02d5a80a0ec693f62cc5781778",
+  "dataset_sha256": {
+    "oof": "1b86d2f957b33082081bba410fe129b475efebcc13c9014c3f447c8271aadf95",
+    "kddtest": "fa46b0935342616aa83b7c2578db355b6a7aaabbc492248172c7a1e8b7ab8f84"
+  },
+  "primary": [
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "Baseline",
+      "mean": 70.03,
+      "sd": 0.67
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "Baseline",
+      "mean": 61.25,
+      "sd": 4.04
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "Baseline",
+      "mean": 60.37,
+      "sd": 6.64
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "Baseline",
+      "mean": 71.99,
+      "sd": 0.94
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "Focal only",
+      "mean": 69.33,
+      "sd": 1.55
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "Focal only",
+      "mean": 73.72,
+      "sd": 1.58
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "Focal only",
+      "mean": 65.21,
+      "sd": 3.27
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "Focal only",
+      "mean": 73.2,
+      "sd": 1.12
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "Batching only",
+      "mean": 67.98,
+      "sd": 0.64
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "Batching only",
+      "mean": 68.8,
+      "sd": 4.79
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "Batching only",
+      "mean": 65.39,
+      "sd": 2.14
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "Batching only",
+      "mean": 67.99,
+      "sd": 1.13
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "Scaling only",
+      "mean": 70.78,
+      "sd": 1.58
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "Scaling only",
+      "mean": 72.23,
+      "sd": 0.91
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "Scaling only",
+      "mean": 64.38,
+      "sd": 2.04
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "Scaling only",
+      "mean": 74.77,
+      "sd": 2.39
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "Focal + batching",
+      "mean": 60.49,
+      "sd": 1.19
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "Focal + batching",
+      "mean": 62.6,
+      "sd": 3.35
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "Focal + batching",
+      "mean": 59.19,
+      "sd": 2.52
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "Focal + batching",
+      "mean": 59.28,
+      "sd": 1.56
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "Focal + scaling",
+      "mean": 70.61,
+      "sd": 1.43
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "Focal + scaling",
+      "mean": 73.78,
+      "sd": 1.88
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "Focal + scaling",
+      "mean": 66.02,
+      "sd": 2.76
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "Focal + scaling",
+      "mean": 73.69,
+      "sd": 0.89
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "Batching + scaling",
+      "mean": 72.32,
+      "sd": 0.52
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "Batching + scaling",
+      "mean": 72.36,
+      "sd": 3.01
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "Batching + scaling",
+      "mean": 70.28,
+      "sd": 1.11
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "Batching + scaling",
+      "mean": 72.69,
+      "sd": 1.31
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv2d",
+      "configuration": "All three controls",
+      "mean": 69.38,
+      "sd": 2.29
+    },
+    {
+      "partition": "oof",
+      "architecture": "conv1d",
+      "configuration": "All three controls",
+      "mean": 71.12,
+      "sd": 3.73
+    },
+    {
+      "partition": "oof",
+      "architecture": "transformer",
+      "configuration": "All three controls",
+      "mean": 71.56,
+      "sd": 1.22
+    },
+    {
+      "partition": "oof",
+      "architecture": "mlp",
+      "configuration": "All three controls",
+      "mean": 71.64,
+      "sd": 0.55
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "Baseline",
+      "mean": 16.53,
+      "sd": 1.58
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "Baseline",
+      "mean": 21.89,
+      "sd": 5.25
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "Baseline",
+      "mean": 15.9,
+      "sd": 8.93
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "Baseline",
+      "mean": 31.52,
+      "sd": 2.2
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "Focal only",
+      "mean": 22.86,
+      "sd": 6.75
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "Focal only",
+      "mean": 28.54,
+      "sd": 1.09
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "Focal only",
+      "mean": 24.19,
+      "sd": 6.5
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "Focal only",
+      "mean": 28.97,
+      "sd": 5.1
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "Batching only",
+      "mean": 27.83,
+      "sd": 3.78
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "Batching only",
+      "mean": 32.77,
+      "sd": 2.92
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "Batching only",
+      "mean": 27.61,
+      "sd": 6.67
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "Batching only",
+      "mean": 30.74,
+      "sd": 3.98
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "Scaling only",
+      "mean": 18.4,
+      "sd": 1.8
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "Scaling only",
+      "mean": 28.14,
+      "sd": 3.11
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "Scaling only",
+      "mean": 18.49,
+      "sd": 9.23
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "Scaling only",
+      "mean": 31.25,
+      "sd": 2.29
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "Focal + batching",
+      "mean": 31.72,
+      "sd": 3.79
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "Focal + batching",
+      "mean": 31.59,
+      "sd": 5.16
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "Focal + batching",
+      "mean": 32.23,
+      "sd": 3.73
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "Focal + batching",
+      "mean": 28.47,
+      "sd": 3.47
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "Focal + scaling",
+      "mean": 19.22,
+      "sd": 7.55
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "Focal + scaling",
+      "mean": 29.66,
+      "sd": 1.6
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "Focal + scaling",
+      "mean": 24.06,
+      "sd": 6.48
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "Focal + scaling",
+      "mean": 29.33,
+      "sd": 6.02
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "Batching + scaling",
+      "mean": 28.85,
+      "sd": 2.44
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "Batching + scaling",
+      "mean": 32.69,
+      "sd": 1.42
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "Batching + scaling",
+      "mean": 28.85,
+      "sd": 3.8
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "Batching + scaling",
+      "mean": 31.84,
+      "sd": 2.44
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv2d",
+      "configuration": "All three controls",
+      "mean": 27.38,
+      "sd": 3.28
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "conv1d",
+      "configuration": "All three controls",
+      "mean": 31.98,
+      "sd": 4.59
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "transformer",
+      "configuration": "All three controls",
+      "mean": 30.57,
+      "sd": 3.26
+    },
+    {
+      "partition": "kddtest",
+      "architecture": "mlp",
+      "configuration": "All three controls",
+      "mean": 31.86,
+      "sd": 3.06
+    }
+  ],
+  "primary_aggregates": [
+    {
+      "partition": "oof",
+      "configuration": "Baseline",
+      "mean": 65.91,
+      "sd": 5.95
+    },
+    {
+      "partition": "oof",
+      "configuration": "Focal only",
+      "mean": 70.36,
+      "sd": 3.96
+    },
+    {
+      "partition": "oof",
+      "configuration": "Batching only",
+      "mean": 67.54,
+      "sd": 1.48
+    },
+    {
+      "partition": "oof",
+      "configuration": "Scaling only",
+      "mean": 70.54,
+      "sd": 4.43
+    },
+    {
+      "partition": "oof",
+      "configuration": "Focal + batching",
+      "mean": 60.39,
+      "sd": 1.59
+    },
+    {
+      "partition": "oof",
+      "configuration": "Focal + scaling",
+      "mean": 71.02,
+      "sd": 3.65
+    },
+    {
+      "partition": "oof",
+      "configuration": "Batching + scaling",
+      "mean": 71.91,
+      "sd": 1.1
+    },
+    {
+      "partition": "oof",
+      "configuration": "All three controls",
+      "mean": 70.92,
+      "sd": 1.06
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "Baseline",
+      "mean": 21.46,
+      "sd": 7.22
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "Focal only",
+      "mean": 26.14,
+      "sd": 3.07
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "Batching only",
+      "mean": 29.74,
+      "sd": 2.48
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "Scaling only",
+      "mean": 24.07,
+      "sd": 6.62
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "Focal + batching",
+      "mean": 31.0,
+      "sd": 1.71
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "Focal + scaling",
+      "mean": 25.57,
+      "sd": 4.95
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "Batching + scaling",
+      "mean": 30.56,
+      "sd": 2.0
+    },
+    {
+      "partition": "kddtest",
+      "configuration": "All three controls",
+      "mean": 30.45,
+      "sd": 2.14
+    }
+  ],
+  "architecture_summary": [
+    {
+      "configuration": "Baseline",
+      "mean": 21.46,
+      "minimum": 15.9,
+      "range": 15.62,
+      "sd": 7.22
+    },
+    {
+      "configuration": "Focal only",
+      "mean": 26.14,
+      "minimum": 22.86,
+      "range": 6.11,
+      "sd": 3.07
+    },
+    {
+      "configuration": "Batching only",
+      "mean": 29.74,
+      "minimum": 27.61,
+      "range": 5.16,
+      "sd": 2.48
+    },
+    {
+      "configuration": "Scaling only",
+      "mean": 24.07,
+      "minimum": 18.4,
+      "range": 12.85,
+      "sd": 6.62
+    },
+    {
+      "configuration": "Focal + batching",
+      "mean": 31.0,
+      "minimum": 28.47,
+      "range": 3.76,
+      "sd": 1.71
+    },
+    {
+      "configuration": "Focal + scaling",
+      "mean": 25.57,
+      "minimum": 19.22,
+      "range": 10.44,
+      "sd": 4.95
+    },
+    {
+      "configuration": "Batching + scaling",
+      "mean": 30.56,
+      "minimum": 28.85,
+      "range": 3.84,
+      "sd": 2.0
+    },
+    {
+      "configuration": "All three controls",
+      "mean": 30.45,
+      "minimum": 27.38,
+      "range": 4.6,
+      "sd": 2.14
+    }
+  ],
+  "secondary": [
+    {
+      "configuration": "Baseline",
+      "metric": "mcc",
+      "value": 63.16
+    },
+    {
+      "configuration": "Baseline",
+      "metric": "macro_f1",
+      "value": 54.77
+    },
+    {
+      "configuration": "Baseline",
+      "metric": "rare_f1",
+      "value": 21.46
+    },
+    {
+      "configuration": "Baseline",
+      "metric": "r2l_f1",
+      "value": 21.12
+    },
+    {
+      "configuration": "Baseline",
+      "metric": "u2r_f1",
+      "value": 21.8
+    },
+    {
+      "configuration": "Baseline",
+      "metric": "r2l_recall",
+      "value": 12.34
+    },
+    {
+      "configuration": "Baseline",
+      "metric": "u2r_recall",
+      "value": 13.81
+    },
+    {
+      "configuration": "Focal only",
+      "metric": "mcc",
+      "value": 64.28
+    },
+    {
+      "configuration": "Focal only",
+      "metric": "macro_f1",
+      "value": 57.43
+    },
+    {
+      "configuration": "Focal only",
+      "metric": "rare_f1",
+      "value": 26.14
+    },
+    {
+      "configuration": "Focal only",
+      "metric": "r2l_f1",
+      "value": 20.82
+    },
+    {
+      "configuration": "Focal only",
+      "metric": "u2r_f1",
+      "value": 31.46
+    },
+    {
+      "configuration": "Focal only",
+      "metric": "r2l_recall",
+      "value": 12.11
+    },
+    {
+      "configuration": "Focal only",
+      "metric": "u2r_recall",
+      "value": 23.51
+    },
+    {
+      "configuration": "Batching only",
+      "metric": "mcc",
+      "value": 63.76
+    },
+    {
+      "configuration": "Batching only",
+      "metric": "macro_f1",
+      "value": 58.52
+    },
+    {
+      "configuration": "Batching only",
+      "metric": "rare_f1",
+      "value": 29.74
+    },
+    {
+      "configuration": "Batching only",
+      "metric": "r2l_f1",
+      "value": 23.14
+    },
+    {
+      "configuration": "Batching only",
+      "metric": "u2r_f1",
+      "value": 36.34
+    },
+    {
+      "configuration": "Batching only",
+      "metric": "r2l_recall",
+      "value": 13.85
+    },
+    {
+      "configuration": "Batching only",
+      "metric": "u2r_recall",
+      "value": 37.31
+    },
+    {
+      "configuration": "Scaling only",
+      "metric": "mcc",
+      "value": 63.19
+    },
+    {
+      "configuration": "Scaling only",
+      "metric": "macro_f1",
+      "value": 55.83
+    },
+    {
+      "configuration": "Scaling only",
+      "metric": "rare_f1",
+      "value": 24.07
+    },
+    {
+      "configuration": "Scaling only",
+      "metric": "r2l_f1",
+      "value": 21.14
+    },
+    {
+      "configuration": "Scaling only",
+      "metric": "u2r_f1",
+      "value": 27.01
+    },
+    {
+      "configuration": "Scaling only",
+      "metric": "r2l_recall",
+      "value": 12.33
+    },
+    {
+      "configuration": "Scaling only",
+      "metric": "u2r_recall",
+      "value": 20.9
+    },
+    {
+      "configuration": "Focal + batching",
+      "metric": "mcc",
+      "value": 63.53
+    },
+    {
+      "configuration": "Focal + batching",
+      "metric": "macro_f1",
+      "value": 58.69
+    },
+    {
+      "configuration": "Focal + batching",
+      "metric": "rare_f1",
+      "value": 31.0
+    },
+    {
+      "configuration": "Focal + batching",
+      "metric": "r2l_f1",
+      "value": 23.02
+    },
+    {
+      "configuration": "Focal + batching",
+      "metric": "u2r_f1",
+      "value": 38.99
+    },
+    {
+      "configuration": "Focal + batching",
+      "metric": "r2l_recall",
+      "value": 13.44
+    },
+    {
+      "configuration": "Focal + batching",
+      "metric": "u2r_recall",
+      "value": 44.03
+    },
+    {
+      "configuration": "Focal + scaling",
+      "metric": "mcc",
+      "value": 64.49
+    },
+    {
+      "configuration": "Focal + scaling",
+      "metric": "macro_f1",
+      "value": 57.23
+    },
+    {
+      "configuration": "Focal + scaling",
+      "metric": "rare_f1",
+      "value": 25.57
+    },
+    {
+      "configuration": "Focal + scaling",
+      "metric": "r2l_f1",
+      "value": 22.74
+    },
+    {
+      "configuration": "Focal + scaling",
+      "metric": "u2r_f1",
+      "value": 28.4
+    },
+    {
+      "configuration": "Focal + scaling",
+      "metric": "r2l_recall",
+      "value": 13.41
+    },
+    {
+      "configuration": "Focal + scaling",
+      "metric": "u2r_recall",
+      "value": 21.39
+    },
+    {
+      "configuration": "Batching + scaling",
+      "metric": "mcc",
+      "value": 63.69
+    },
+    {
+      "configuration": "Batching + scaling",
+      "metric": "macro_f1",
+      "value": 58.8
+    },
+    {
+      "configuration": "Batching + scaling",
+      "metric": "rare_f1",
+      "value": 30.56
+    },
+    {
+      "configuration": "Batching + scaling",
+      "metric": "r2l_f1",
+      "value": 22.74
+    },
+    {
+      "configuration": "Batching + scaling",
+      "metric": "u2r_f1",
+      "value": 38.38
+    },
+    {
+      "configuration": "Batching + scaling",
+      "metric": "r2l_recall",
+      "value": 13.54
+    },
+    {
+      "configuration": "Batching + scaling",
+      "metric": "u2r_recall",
+      "value": 27.74
+    },
+    {
+      "configuration": "All three controls",
+      "metric": "mcc",
+      "value": 63.44
+    },
+    {
+      "configuration": "All three controls",
+      "metric": "macro_f1",
+      "value": 58.43
+    },
+    {
+      "configuration": "All three controls",
+      "metric": "rare_f1",
+      "value": 30.45
+    },
+    {
+      "configuration": "All three controls",
+      "metric": "r2l_f1",
+      "value": 22.44
+    },
+    {
+      "configuration": "All three controls",
+      "metric": "u2r_f1",
+      "value": 38.45
+    },
+    {
+      "configuration": "All three controls",
+      "metric": "r2l_recall",
+      "value": 13.03
+    },
+    {
+      "configuration": "All three controls",
+      "metric": "u2r_recall",
+      "value": 29.73
+    }
+  ],
+  "interactions": [
+    {
+      "partition": "oof",
+      "interaction": "focal_batching",
+      "value": -6.53
+    },
+    {
+      "partition": "kddtest",
+      "interaction": "focal_batching",
+      "value": -2.51
+    },
+    {
+      "partition": "oof",
+      "interaction": "focal_scaling",
+      "value": 1.09
+    },
+    {
+      "partition": "kddtest",
+      "interaction": "focal_scaling",
+      "value": -2.28
+    },
+    {
+      "partition": "oof",
+      "interaction": "batching_scaling",
+      "value": 4.81
+    },
+    {
+      "partition": "kddtest",
+      "interaction": "batching_scaling",
+      "value": -0.89
+    },
+    {
+      "partition": "oof",
+      "interaction": "three_way_pp",
+      "value": 10.14
+    },
+    {
+      "partition": "kddtest",
+      "interaction": "three_way_pp",
+      "value": 1.81
+    }
+  ],
+  "coefficients": [
+    {
+      "architecture": "conv2d",
+      "base_training": "baseline",
+      "r2l_score_coefficient": 1.15,
+      "u2r_score_coefficient": 0.7
+    },
+    {
+      "architecture": "conv2d",
+      "base_training": "focal_only",
+      "r2l_score_coefficient": 1.0,
+      "u2r_score_coefficient": 1.9
+    },
+    {
+      "architecture": "conv2d",
+      "base_training": "batch_only",
+      "r2l_score_coefficient": 1.0,
+      "u2r_score_coefficient": 10.0
+    },
+    {
+      "architecture": "conv2d",
+      "base_training": "focal_batch",
+      "r2l_score_coefficient": 1.15,
+      "u2r_score_coefficient": 8.0
+    },
+    {
+      "architecture": "conv1d",
+      "base_training": "baseline",
+      "r2l_score_coefficient": 0.85,
+      "u2r_score_coefficient": 0.4
+    },
+    {
+      "architecture": "conv1d",
+      "base_training": "focal_only",
+      "r2l_score_coefficient": 0.7,
+      "u2r_score_coefficient": 1.0
+    },
+    {
+      "architecture": "conv1d",
+      "base_training": "batch_only",
+      "r2l_score_coefficient": 1.0,
+      "u2r_score_coefficient": 1.75
+    },
+    {
+      "architecture": "conv1d",
+      "base_training": "focal_batch",
+      "r2l_score_coefficient": 1.3,
+      "u2r_score_coefficient": 8.0
+    },
+    {
+      "architecture": "transformer",
+      "base_training": "baseline",
+      "r2l_score_coefficient": 0.85,
+      "u2r_score_coefficient": 0.25
+    },
+    {
+      "architecture": "transformer",
+      "base_training": "focal_only",
+      "r2l_score_coefficient": 0.55,
+      "u2r_score_coefficient": 1.9
+    },
+    {
+      "architecture": "transformer",
+      "base_training": "batch_only",
+      "r2l_score_coefficient": 1.3,
+      "u2r_score_coefficient": 6.0
+    },
+    {
+      "architecture": "transformer",
+      "base_training": "focal_batch",
+      "r2l_score_coefficient": 1.0,
+      "u2r_score_coefficient": 10.0
+    },
+    {
+      "architecture": "mlp",
+      "base_training": "baseline",
+      "r2l_score_coefficient": 1.3,
+      "u2r_score_coefficient": 0.25
+    },
+    {
+      "architecture": "mlp",
+      "base_training": "focal_only",
+      "r2l_score_coefficient": 1.0,
+      "u2r_score_coefficient": 0.85
+    },
+    {
+      "architecture": "mlp",
+      "base_training": "batch_only",
+      "r2l_score_coefficient": 1.3,
+      "u2r_score_coefficient": 7.0
+    },
+    {
+      "architecture": "mlp",
+      "base_training": "focal_batch",
+      "r2l_score_coefficient": 1.45,
+      "u2r_score_coefficient": 4.5
+    }
+  ],
+  "parameters": {
+    "conv2d": 109381,
+    "conv1d": 109797,
+    "transformer": 110661,
+    "mlp": 99845
+  },
+  "focal_parameters": {
+    "conv2d": {
+      "beta": 0.99,
+      "gamma": 0.5
+    },
+    "conv1d": {
+      "beta": 0.99,
+      "gamma": 0.25
+    },
+    "transformer": {
+      "beta": 0.99,
+      "gamma": 0.75
+    },
+    "mlp": {
+      "beta": 0.99,
+      "gamma": 0.25
+    }
+  },
+  "class_counts": {
+    "oof": [
+      45927,
+      11656,
+      995,
+      52,
+      67343
+    ],
+    "kddtest": [
+      7458,
+      2421,
+      2887,
+      67,
+      9711
+    ]
+  },
+  "batching_marginal_pp": {
+    "conv2d": 9.69,
+    "conv1d": 5.2,
+    "transformer": 9.15,
+    "mlp": 0.46
+  },
+  "backbone_winners": {
+    "oof": {
+      "conv2d": "Batching + scaling",
+      "conv1d": "Focal + scaling",
+      "transformer": "All three controls",
+      "mlp": "Scaling only"
+    },
+    "kddtest": {
+      "conv2d": "Focal + batching",
+      "conv1d": "Batching only",
+      "transformer": "Focal + batching",
+      "mlp": "All three controls"
+    }
+  }
+}

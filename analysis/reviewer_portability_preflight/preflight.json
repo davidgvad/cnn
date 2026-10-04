@@ -1,0 +1,109 @@
+{
+  "archive_sha256": "8ed98c407802265992761ddc29ce5abbc8d06b8772ae039921e0aa9355a689aa",
+  "archive_files_verified": 51,
+  "checkout": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/checkout with spaces/cnn_paper_reproduction",
+  "different_working_directory": "/tmp",
+  "path_with_spaces_tested": true,
+  "checks": [
+    {
+      "check": "test_experiment_runtime.py",
+      "exit_code": 0,
+      "seconds": 0.08,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/test_experiment_runtime.py.log"
+    },
+    {
+      "check": "test_paper_reproduction.py",
+      "exit_code": 0,
+      "seconds": 0.47,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/test_paper_reproduction.py.log"
+    },
+    {
+      "check": "test_variant_specific_score_scaling.py",
+      "exit_code": 0,
+      "seconds": 3.1,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/test_variant_specific_score_scaling.py.log"
+    },
+    {
+      "check": "plan_cpu",
+      "exit_code": 0,
+      "seconds": 16.86,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/plan_cpu.log"
+    },
+    {
+      "check": "plan_two_gpu",
+      "exit_code": 0,
+      "seconds": 16.76,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/plan_two_gpu.log"
+    },
+    {
+      "check": "plan_eight_gpu",
+      "exit_code": 0,
+      "seconds": 16.86,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/plan_eight_gpu.log"
+    },
+    {
+      "check": "original_table_validation",
+      "exit_code": 0,
+      "seconds": 3.24,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/original_table_validation.log"
+    },
+    {
+      "check": "reference_comparison",
+      "exit_code": 0,
+      "seconds": 0.07,
+      "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/reference_comparison.log"
+    }
+  ],
+  "reference_metric_values_matched": 1536,
+  "full_paper_training_launched": false,
+  "original_server_files_unchanged": true,
+  "original_files_checked": 90,
+  "cpu_smoke": {
+    "passed": true,
+    "one_epoch_fits": 16,
+    "full_paper_training": false,
+    "cpu_intraop_threads": 2,
+    "cpu_interop_threads": 2,
+    "seconds": 85.47,
+    "log": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu_smoke.log",
+    "report": "/home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_check.json"
+  },
+  "unit_test_counts": {
+    "test_experiment_runtime.py": 6,
+    "test_paper_reproduction.py": 5,
+    "test_variant_specific_score_scaling.py": 7
+  },
+  "tested_source_sha256": {
+    "src/tune_transformer_focal_cv_4gpu.py": "40c5310a62b4b0eed09844bd5ce6f46ea870dd76ec02151f387728430029ec22",
+    "src/export_paper_tables.py": "bc2c8d97c35a78921fa31ff653edd4e56b6003e0e4324c87caa7e2f8f3766159",
+    "src/cnn_opt_1d_4gpu.py": "b6f33a7471ac47f565f6dc5a404459cc5f87960cb64903624bd1f9b9f97a7c5b",
+    "src/experiment_runtime.py": "247ce4f095910f7714ae79263187eb1367ff438cb8975b452c950b184e3bc1df",
+    "src/run_conv1d_batch_baseline_cv_4gpu.py": "c2b0b34951233740316adc7ff5fc4a563d8b811c7c6e840705f6379765f2bf75",
+    "src/run_conv2d_focal_batch_cv_4gpu.py": "38e35d064a963624cc54dc4081bf8a2c54e82722740fa025a24bb0d5cb243c24",
+    "src/run_conv2d_baseline_cv_4gpu.py": "35f4e9d73bb012d39da02231b2226b49da17b6b6012d4ca88b0de8f375b6314a",
+    "src/tune_mlp_focal_cv_4gpu.py": "a33d5d75cb2a2f2492324bb3a6b8cd9fc82048c841149a8ca25370566e8ba3eb",
+    "src/run_conv1d_focal_batch_cv_4gpu.py": "2cecdf266cbc1c4cbc9bfc3350b70ee5c550c5e2d83e60ebe2c6cd302e95a0c6",
+    "src/run_no_ctgan_model_ablation_4gpu.py": "4e351ed622aad04155c5cbd917896af4e2dda77c24f196665363da58925c0aa0",
+    "src/tune_variant_specific_score_scaling.py": "9f70247c59dbc7a9b2c92e74141c4c913494f51205d88ad2717a4748fd1352d1",
+    "src/paper_config.py": "c545c0d02404a0960c8fbf85387247044444a9f80795e242025b14b058c3f647",
+    "src/run_final_baseline_vs_full_kddtest_4gpu.py": "1e268cb1dbf9556828f7c68ca073d9c591c313c3dc595f554b76fec8b95c887c",
+    "src/run_transformer_baseline_cv_4gpu.py": "4feb62f1aca53835e6862446812c31f9a8a6784ff123be2c5404b2110005cfbf",
+    "src/run_mlp_focal_batch_cv_4gpu.py": "546809e4845a6c204ec5d29a05c0807a25119b08b13e9c7eee29ee596f98582a",
+    "src/tune_conv2d_focal_cv_4gpu.py": "5440ee645eaec7e962481463ebdbd30999176bca58ba1062386d5c7150205736",
+    "src/run_mlp_batch_baseline_cv_4gpu.py": "7fca18046c94ba3140b55cf474a0a7bef10ffe3de67ccbbfd4f69569d9cb6a2a",
+    "src/paper_metrics.py": "73ad7a51bad6da4560e52485d57874b7be1afb5ec1efc5ebc6332c89c899768b",
+    "src/run_conv2d_batch_baseline_cv_4gpu.py": "4aaa53fd3ca3b3221e20e2f3c76627d1ba00fe23eac501ee0d5ae624cb66d332",
+    "src/cnn_gan_foc.py": "99474647be2936331d98e8f6245ff4d110b7703bb6662d4de81a5cf9ff2a6b76",
+    "src/run_transformer_batch_baseline_cv_4gpu.py": "814ee116c1597d0ed8bc2a8be842a915a6bb8e83275305869772f20205fcbee7",
+    "src/tune_conv2d_score_scaling_cv_4gpu.py": "0853cbcd5e8d3a41606f6b6f8cfe5608c6984c7d71b73ff778c16b88e60eecc6",
+    "src/run_mlp_baseline_cv_4gpu.py": "acbea99ab9b9e4b2931f80a9068b15871612fc950f3fc8b64e3689d6e345ff2b",
+    "src/tune_conv1d_focal_cv_4gpu.py": "e0b2471512e8277b5da8221a70b49e9596b54a2282d6ce95538effd490144209",
+    "src/run_transformer_focal_batch_cv_4gpu.py": "a4a743d62def1cbf36e8d4c586b5f9904b594f3fe837393ef0956a0ba8359c84",
+    "src/run_conv1d_baseline_cv_4gpu.py": "75dc9e8fd88a586b8224de007118cd6022c2014f82827aa6249545a9788b78e3",
+    "src/cnn_opt.py": "64f8c99938c3efac017091324ab9935df923502e933b045a56fe66ed6f034c11",
+    "tests/test_paper_reproduction.py": "4812d3b9649fb9f5d2883c0f275051e387e7ccd3ad7945fb9e000ea0374fdfeb",
+    "tests/test_variant_specific_score_scaling.py": "32d9cc21abc1b6ac845b384a60ec6a6e4f6d96e1feb77f621e572e220696d3fd",
+    "tests/test_experiment_runtime.py": "b9d65e771b85a879f35657895277e3ca2bf6d740006910cc075d6948208aa9ca"
+  },
+  "additional_test_sha256": "32d9cc21abc1b6ac845b384a60ec6a6e4f6d96e1feb77f621e572e220696d3fd"
+}

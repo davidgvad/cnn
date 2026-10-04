@@ -16,7 +16,7 @@ order to form one complete out-of-fold prediction vector. Metrics are
 calculated once on that vector for each seed, followed by mean and sample
 standard deviation across the three seeds.
 
-Each fit runs in a fresh subprocess with exactly one visible GPU. Completed
+Each fit runs in a fresh subprocess on CPU or exactly one visible GPU. Completed
 artifacts are validated and reused when the same command is rerun.
 """
 
@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 import run_no_ctgan_model_ablation_4gpu as core
+import experiment_runtime as runtime
 
 
 SCHEMA_VERSION = 1
@@ -374,11 +375,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
 
     visible_gpus = tf.config.list_physical_devices("GPU")
-    if len(visible_gpus) != 1:
-        raise RuntimeError(
-            "Each worker must see exactly one GPU; TensorFlow sees "
-            f"{len(visible_gpus)}: {visible_gpus}."
-        )
+    runtime.validate_worker_devices(visible_gpus, allow_cpu=args.allow_cpu)
     for device in visible_gpus:
         try:
             tf.config.experimental.set_memory_growth(device, True)
@@ -506,6 +503,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "assigned_gpu": os.environ.get("EXPERIMENT_GPU_ID", ""),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "tensorflow_visible_gpu_count": len(visible_gpus),
+        "runtime_device": "cpu" if args.allow_cpu else "gpu",
         "deterministic_ops_requested": bool(args.deterministic_ops),
         "deterministic_ops_enabled": deterministic_enabled,
         "tensorflow_version": core.package_version("tensorflow"),
@@ -657,6 +655,8 @@ def build_worker_command(
         "--fit-verbose",
         str(args.fit_verbose),
     ]
+    if args.allow_cpu:
+        command.append("--allow-cpu")
     if args.deterministic_ops:
         command.append("--deterministic-ops")
     return command
@@ -864,15 +864,7 @@ def formatted_summary(summary: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--gpus",
-        nargs="+",
-        default=["0", "1", "2", "3"],
-        help=(
-            "One to four logical GPU IDs used as independent workers "
-            "(default: 0 1 2 3)."
-        ),
-    )
+    runtime.add_arguments(parser)
     parser.add_argument(
         "--seeds",
         type=int,
@@ -1039,21 +1031,16 @@ def main() -> None:
         run_training_worker(args)
         return
 
-    try:
-        gpus = core.parse_gpus(args.gpus)
-    except ValueError as error:
-        parser.error(str(error))
-    if len(gpus) > FOLD_COUNT:
-        parser.error(
-            f"This four-fold runner supports at most {FOLD_COUNT} GPU workers."
-        )
-    cuda_tokens = resolve_cuda_tokens(gpus)
+    runtime_config = runtime.configure_controller(args, parser)
+    gpus = list(runtime_config.workers)
+    cuda_tokens = runtime_config.cuda_tokens
 
-    train_path = repo_root / "data" / "KDDTrain+.txt"
+    train_path = runtime.data_directory(args, repo_root) / "KDDTrain+.txt"
     required_paths = [
         train_path,
         script_path,
         repo_root / "src" / "run_no_ctgan_model_ablation_4gpu.py",
+        repo_root / "src" / "experiment_runtime.py",
         repo_root / "src" / "cnn_opt.py",
         repo_root / "src" / "cnn_opt_1d_4gpu.py",
         repo_root / "src" / "cnn_gan_foc.py",
@@ -1106,7 +1093,7 @@ def main() -> None:
     experiment_key = stable_hash(identity, 12)
     prefix = args.name_prefix.strip()
     stem = f"{prefix}_{experiment_key}"
-    results_dir = repo_root / "results"
+    results_dir = runtime.results_directory(args, repo_root)
     run_dir = results_dir / f"{stem}_runs"
     log_dir = results_dir / f"{stem}_logs"
     cache_dir = results_dir / f"{stem}_fold_cache"
@@ -1163,7 +1150,7 @@ def main() -> None:
 
     print("MLP focal-loss Stage-1 sweep")
     print(f"Experiment key: {experiment_key}")
-    print(f"GPU workers: {gpus}")
+    print(f"Execution workers: {gpus}")
     print(f"CUDA allocation mapping: {cuda_tokens}")
     print(f"Betas: {args.betas}")
     print(f"Focal gammas: {args.focal_gammas}")
@@ -1246,6 +1233,7 @@ def main() -> None:
         "expected_seed_level_oof_rows": len(configs) * len(args.seeds),
         "expected_ranking_rows": len(configs),
         "runtime_gpu_workers": gpus,
+        "runtime": runtime_config.metadata(),
         "runtime_cuda_mapping": cuda_tokens,
         "parallel_worker_count": len(gpus),
         "preprocessing_protocol": (

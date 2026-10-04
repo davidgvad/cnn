@@ -1,0 +1,19 @@
+\begin{table*}[t]
+\centering
+\caption{table 08 secondary test}
+\label{tab:secondary_test}
+\begin{tabular}{llllllll}
+\hline
+Configuration & MCC & Macro-F1 & Rare Macro-F1 & R2L F1 & U2R F1 & R2L Recall & U2R Recall \\
+\hline
+Baseline & 63.16 & 54.77 & 21.46 & 21.12 & 21.80 & 12.34 & 13.81 \\
+Focal only & 64.28 & 57.43 & 26.14 & 20.82 & 31.46 & 12.11 & 23.51 \\
+Batching only & 63.76 & 58.52 & 29.74 & 23.14 & 36.34 & 13.85 & 37.31 \\
+Scaling only & 63.19 & 55.83 & 24.07 & 21.14 & 27.01 & 12.33 & 20.90 \\
+Focal + batching & 63.53 & 58.69 & 31.00 & 23.02 & 38.99 & 13.44 & 44.03 \\
+Focal + scaling & 64.49 & 57.23 & 25.57 & 22.74 & 28.40 & 13.41 & 21.39 \\
+Batching + scaling & 63.69 & 58.80 & 30.56 & 22.74 & 38.38 & 13.54 & 27.74 \\
+All three controls & 63.44 & 58.43 & 30.45 & 22.44 & 38.45 & 13.03 & 29.73 \\
+\hline
+\end{tabular}
+\end{table*}

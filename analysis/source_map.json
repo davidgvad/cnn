@@ -1,0 +1,4021 @@
+[
+  {
+    "path": "src/add_transformer_to_model_comparison.py",
+    "lines": 1112,
+    "docstring": "Add a five-seed Transformer baseline to the existing five-model comparison.\n\nThe original model5_param_matched experiment already contains five paired\nKDDTest+ runs for MLP, standard XGBoost, cost-sensitive XGBoost, Conv1D, and\nConv2D. This script:\n\n1. validates those original per-seed results;\n2. trains the parameter-matched Transformer for the same seeds;\n3. combines all six models from raw per-seed results; and\n4. writes a fresh mean +/- sample-standard-deviation table.\n\nThe original five-model files are never modified.\n\nFor comparability, this intentionally reproduces the historical neural\nprotocol in which the cached synthetic rows were added before the 80/20\ntrain/validation split. It should not be mixed with newer real-only-validation\nruns.",
+    "definitions": [
+      {
+        "name": "parse_gpus",
+        "line": 80,
+        "end_line": 90
+      },
+      {
+        "name": "resolve_path",
+        "line": 93,
+        "end_line": 97
+      },
+      {
+        "name": "fingerprint_files",
+        "line": 100,
+        "end_line": 113
+      },
+      {
+        "name": "read_metadata",
+        "line": 116,
+        "end_line": 123
+      },
+      {
+        "name": "read_metrics",
+        "line": 126,
+        "end_line": 141
+      },
+      {
+        "name": "resolve_recorded_result_path",
+        "line": 144,
+        "end_line": 160
+      },
+      {
+        "name": "require_numeric_metadata",
+        "line": 163,
+        "end_line": 181
+      },
+      {
+        "name": "parse_count_list",
+        "line": 184,
+        "end_line": 199
+      },
+      {
+        "name": "validate_base_runs",
+        "line": 202,
+        "end_line": 460
+      },
+      {
+        "name": "current_synth_counts",
+        "line": 463,
+        "end_line": 484
+      },
+      {
+        "name": "build_transformer_command",
+        "line": 487,
+        "end_line": 537
+      },
+      {
+        "name": "transformer_result_is_complete",
+        "line": 540,
+        "end_line": 606
+      },
+      {
+        "name": "format_metric",
+        "line": 609,
+        "end_line": 610
+      },
+      {
+        "name": "main",
+        "line": 613,
+        "end_line": 1108
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import ast",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import os",
+      "from pathlib import Path",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/audit_validation_filtered_fusion_kddtest.py",
+    "lines": 1335,
+    "docstring": "Post-hoc validation-filtered Super-Stack tolerance audit on KDDTest+.\n\nThis script answers an explicitly exploratory question:\n\n* among the 68,124 canonical fusion rules already evaluated on KDDTrain+ OOF\n  predictions, which rules are no more than a fixed Rare-F1 tolerance below\n  the strongest standalone validation configuration; and\n* after applying every such survivor unchanged to saved KDDTest+\n  probabilities, which are also no more than that tolerance below the\n  strongest standalone KDDTest+ configuration?\n\nThe four standalone comparators are General (baseline), Focal-only,\nBatching-only, and Baseline + the architecture-specific frozen score scaling\nused by the original three-stage ablation.  Neural backbones are never\nretrained.  Stack-family survivors require a full-OOF refit of their small\nmultinomial logistic meta-model before test inference.  Refits are shared by\nall rho/offset rules with the same calibration, feature set, q, and C.\n\nKDDTest+ participates in the final pass/fail audit.  Consequently the output\nis a post-hoc validation-test tolerance/Pareto analysis, not an untouched-test\nmodel-selection result.\n\nExamples:\n\n    python -u src/audit_validation_filtered_fusion_kddtest.py --dry-run\n    python -u src/audit_validation_filtered_fusion_kddtest.py         --workers 18 --threads-per-worker 1",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 78,
+        "end_line": 82
+      },
+      {
+        "name": "fusion_mask",
+        "line": 85,
+        "end_line": 90
+      },
+      {
+        "name": "aggregate_prediction_metrics",
+        "line": 93,
+        "end_line": 117
+      },
+      {
+        "name": "standalone_metrics_from_probabilities",
+        "line": 120,
+        "end_line": 170
+      },
+      {
+        "name": "validation_survivors",
+        "line": 173,
+        "end_line": 233
+      },
+      {
+        "name": "score_probability_candidates",
+        "line": 236,
+        "end_line": 306
+      },
+      {
+        "name": "aggregate_candidate_test_metrics",
+        "line": 309,
+        "end_line": 333
+      },
+      {
+        "name": "apply_test_guard",
+        "line": 336,
+        "end_line": 391
+      },
+      {
+        "name": "_worker_initializer",
+        "line": 394,
+        "end_line": 403
+      },
+      {
+        "name": "_score_stack_task",
+        "line": 406,
+        "end_line": 534
+      },
+      {
+        "name": "stack_tasks",
+        "line": 537,
+        "end_line": 568
+      },
+      {
+        "name": "progress_message",
+        "line": 571,
+        "end_line": 590
+      },
+      {
+        "name": "task_fingerprint",
+        "line": 593,
+        "end_line": 620
+      },
+      {
+        "name": "cache_task_result",
+        "line": 623,
+        "end_line": 646
+      },
+      {
+        "name": "load_cached_task",
+        "line": 649,
+        "end_line": 707
+      },
+      {
+        "name": "parse_arguments",
+        "line": 710,
+        "end_line": 775
+      },
+      {
+        "name": "main",
+        "line": 778,
+        "end_line": 1331
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ProcessPoolExecutor, as_completed",
+      "from dataclasses import asdict",
+      "import hashlib",
+      "import json",
+      "import multiprocessing as mp",
+      "import os",
+      "from pathlib import Path",
+      "import time",
+      "from typing import Any, Dict, Mapping, Sequence",
+      "import warnings",
+      "import numpy as np",
+      "import pandas as pd",
+      "from sklearn.exceptions import ConvergenceWarning",
+      "from sklearn.linear_model import LogisticRegression",
+      "from threadpoolctl import threadpool_limits",
+      "import evaluate_final_natural_rare_super_stack_kddtest as natural_eval",
+      "import evaluate_final_simple_average_vs_safe_stack_kddtest as final_sources",
+      "import run_final_baseline_vs_full_kddtest_4gpu as final_core",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import select_fusion_against_all_validation_baselines as selector",
+      "import tune_robust_calibrated_super_stack_all as stack"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/cnn_baseline.py",
+    "lines": 495,
+    "docstring": "Baseline CNN (NO CTGAN) for NSL-KDD 5-Class Intrusion Detection.\n\nWhat this script does\n---------------------\n- Loads NSL-KDD `KDDTrain+.txt` and `KDDTest+.txt`\n- Collapses fine-grained attacks into 5 super-classes: DoS / Probe / R2L / U2R / normal\n- One-hot encodes: protocol_type, service, flag  (fit on train, transform test)\n- MinMax scales select numeric columns (fit on train, transform test)\n- Reshapes 121 features into 11x11 grayscale \"images\" (no PNGs are written/loaded)\n- Trains a small CNN with standard cross-entropy (plain baseline objective)\n- Evaluates on the official test split and saves plots + a text report into `results/`\n\nRun (from repo root)\n-------------------\npython3 src/cnn_baseline.py --epochs 25",
+    "definitions": [
+      {
+        "name": "Paths",
+        "line": 98,
+        "end_line": 102
+      },
+      {
+        "name": "_repo_paths",
+        "line": 105,
+        "end_line": 112
+      },
+      {
+        "name": "load_nsl_kdd_txt",
+        "line": 115,
+        "end_line": 120
+      },
+      {
+        "name": "collapse_attack_labels",
+        "line": 123,
+        "end_line": 208
+      },
+      {
+        "name": "one_hot_encode",
+        "line": 211,
+        "end_line": 229
+      },
+      {
+        "name": "minmax_scale",
+        "line": 232,
+        "end_line": 241
+      },
+      {
+        "name": "prepare_xy",
+        "line": 244,
+        "end_line": 259
+      },
+      {
+        "name": "build_cnn",
+        "line": 262,
+        "end_line": 274
+      },
+      {
+        "name": "save_confusion_matrices",
+        "line": 277,
+        "end_line": 303
+      },
+      {
+        "name": "save_multiclass_roc",
+        "line": 306,
+        "end_line": 342
+      },
+      {
+        "name": "save_training_plot",
+        "line": 345,
+        "end_line": 359
+      },
+      {
+        "name": "main",
+        "line": 362,
+        "end_line": 489
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from dataclasses import dataclass",
+      "from pathlib import Path",
+      "from typing import Dict, List, Tuple",
+      "import matplotlib",
+      "import matplotlib.pyplot as plt",
+      "import numpy as np",
+      "import pandas as pd",
+      "import seaborn as sns",
+      "import tensorflow as tf",
+      "from sklearn.metrics import (\n    accuracy_score,\n    classification_report,\n    confusion_matrix,\n    matthews_corrcoef,\n    roc_curve,\n    auc,\n)",
+      "from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, label_binarize"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/cnn_fin.py",
+    "lines": 474,
+    "docstring": "cnn_fin.py \u2014 \"Ultimate\" NSL-KDD 5-Class experiment (CTGAN + Focal + Optimized CNN)\n---------------------------------------------------------------------------------\n\nThis script builds on your working pipeline:\n- CTGAN augmentation (cached CSV or generated once)\n- Class-Balanced Focal Loss (alpha recomputed after augmentation/undersampling)\n- \"Optimized\" CNN via grouped convolution (multi-group) + optional BN + residual mixing\n- Optional majority-class undersampling caps (data-side technique from the original thesis script)\n\nRecommended workflow (cluster)\n------------------------------\n1) Precompute CTGAN once:\n   python -u src/cnn_fin.py --ctgan-train --ctgan-regenerate --ctgan-only --target-r2l 5000 --target-u2r 0\n\n2) Train/eval repeatedly (no CTGAN retrain):\n   python -u src/cnn_fin.py --epochs 25\n\nDefault settings\n----------------\nThe defaults are tuned to the current best config from your 120-trial sweep:\n- groups=1\n- focal_gamma=1.5\n- cb_beta=0.9999\n- undersampling disabled by default",
+    "definitions": [
+      {
+        "name": "undersample_caps",
+        "line": 69,
+        "end_line": 82
+      },
+      {
+        "name": "ValF1Callback",
+        "line": 85,
+        "end_line": 107
+      },
+      {
+        "name": "build_grouped_cnn",
+        "line": 110,
+        "end_line": 167
+      },
+      {
+        "name": "save_training_plot",
+        "line": 170,
+        "end_line": 187
+      },
+      {
+        "name": "main",
+        "line": 190,
+        "end_line": 468
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from pathlib import Path",
+      "from typing import Dict, List, Tuple",
+      "import matplotlib",
+      "import matplotlib.pyplot as plt",
+      "import numpy as np",
+      "import tensorflow as tf",
+      "from sklearn.metrics import (\n    accuracy_score,\n    classification_report,\n    f1_score,\n    matthews_corrcoef,\n)",
+      "from sklearn.model_selection import train_test_split",
+      "from cnn_gan_foc import (  # type: ignore\n    CLASS_NAMES,\n    ClassBalancedFocalLoss,\n    _generate_synth_ctgan,\n    _maybe_load_synth,\n    _repo_paths,\n    apply_one_hot,\n    apply_scaler,\n    collapse_attack_labels,\n    compute_cb_alpha_effective_number,\n    fit_one_hot_encoders,\n    fit_scaler,\n    load_nsl_kdd_txt,\n    prepare_xy_from_processed,\n    save_confusion_matrices,\n    save_multiclass_roc,\n)",
+      "import pandas as pd"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/cnn_focal.py",
+    "lines": 598,
+    "docstring": "CNN + Class-Balanced Focal Loss (NO CTGAN) for NSL-KDD 5-Class Intrusion Detection.\n\nThis script is intentionally kept *almost identical* to `src/cnn_baseline.py` so you can\ncompare \"plain cross-entropy\" vs \"focal loss\" apples-to-apples.\n\nKey difference vs baseline\n--------------------------\n- Replaces standard cross-entropy with **Class-Balanced Focal Loss**:\n  - focal term:        (1 - p_t)^gamma\n  - class balance:     alpha_c computed from the \"effective number of samples\"\n    (Cui et al., 2019) so minority classes get larger weight.\n\nRun (from repo root)\n-------------------\npython3 src/cnn_focal.py --epochs 25",
+    "definitions": [
+      {
+        "name": "Paths",
+        "line": 98,
+        "end_line": 102
+      },
+      {
+        "name": "_repo_paths",
+        "line": 105,
+        "end_line": 112
+      },
+      {
+        "name": "load_nsl_kdd_txt",
+        "line": 115,
+        "end_line": 120
+      },
+      {
+        "name": "collapse_attack_labels",
+        "line": 123,
+        "end_line": 207
+      },
+      {
+        "name": "one_hot_encode",
+        "line": 210,
+        "end_line": 228
+      },
+      {
+        "name": "minmax_scale",
+        "line": 231,
+        "end_line": 240
+      },
+      {
+        "name": "prepare_xy",
+        "line": 243,
+        "end_line": 258
+      },
+      {
+        "name": "compute_cb_alpha_effective_number",
+        "line": 261,
+        "end_line": 289
+      },
+      {
+        "name": "ClassBalancedFocalLoss",
+        "line": 293,
+        "end_line": 341
+      },
+      {
+        "name": "build_cnn",
+        "line": 344,
+        "end_line": 360
+      },
+      {
+        "name": "save_confusion_matrices",
+        "line": 363,
+        "end_line": 389
+      },
+      {
+        "name": "save_multiclass_roc",
+        "line": 392,
+        "end_line": 428
+      },
+      {
+        "name": "save_training_plot",
+        "line": 431,
+        "end_line": 445
+      },
+      {
+        "name": "main",
+        "line": 448,
+        "end_line": 592
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from dataclasses import dataclass",
+      "from pathlib import Path",
+      "from typing import Dict, List, Tuple",
+      "import matplotlib",
+      "import matplotlib.pyplot as plt",
+      "import numpy as np",
+      "import pandas as pd",
+      "import seaborn as sns",
+      "import tensorflow as tf",
+      "from sklearn.metrics import (\n    accuracy_score,\n    classification_report,\n    confusion_matrix,\n    matthews_corrcoef,\n    roc_curve,\n    auc,\n)",
+      "from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, label_binarize"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/cnn_gan_foc.py",
+    "lines": 782,
+    "docstring": "CNN + CTGAN Augmentation + Class-Balanced Focal Loss for NSL-KDD (5-Class).\n\nDesign goal\n-----------\nThis script is meant to be a clean, comparable extension of:\n- `src/cnn_baseline.py`  (plain cross-entropy)\n- `src/cnn_focal.py`     (class-balanced focal loss)\n\nKey additions vs focal-only\n---------------------------\n- **CTGAN augmentation (data-side)**: generate/load synthetic training rows for minority classes.\n- **Adjusted focal weighting**: alpha weights are recomputed from the *augmented* training labels\n  (so we don't over-penalize minority classes after oversampling).\n\nImportant notes\n---------------\n- This script never touches the official test split. CTGAN is fit only on KDDTrain+.\n- CTGAN requires extra dependencies (PyTorch + CTGAN). If you already have a synthetic CSV,\n  you can run without installing CTGAN by using `--synth-path ...` and `--no-ctgan-train`.\n\nRun (from repo root)\n-------------------\npython3 src/cnn_gan_foc.py --epochs 25\n\nExample (generate synth if missing)\n----------------------------------\npython3 src/cnn_gan_foc.py --ctgan-train --ctgan-epochs 200 --target-r2l 5000 --target-u2r 5000",
+    "definitions": [
+      {
+        "name": "Paths",
+        "line": 110,
+        "end_line": 114
+      },
+      {
+        "name": "_repo_paths",
+        "line": 117,
+        "end_line": 124
+      },
+      {
+        "name": "load_nsl_kdd_txt",
+        "line": 127,
+        "end_line": 131
+      },
+      {
+        "name": "collapse_attack_labels",
+        "line": 134,
+        "end_line": 211
+      },
+      {
+        "name": "fit_one_hot_encoders",
+        "line": 214,
+        "end_line": 226
+      },
+      {
+        "name": "apply_one_hot",
+        "line": 229,
+        "end_line": 242
+      },
+      {
+        "name": "fit_scaler",
+        "line": 245,
+        "end_line": 248
+      },
+      {
+        "name": "apply_scaler",
+        "line": 251,
+        "end_line": 254
+      },
+      {
+        "name": "prepare_xy_from_processed",
+        "line": 257,
+        "end_line": 273
+      },
+      {
+        "name": "compute_cb_alpha_effective_number",
+        "line": 276,
+        "end_line": 294
+      },
+      {
+        "name": "ClassBalancedFocalLoss",
+        "line": 298,
+        "end_line": 337
+      },
+      {
+        "name": "build_cnn",
+        "line": 340,
+        "end_line": 352
+      },
+      {
+        "name": "save_confusion_matrices",
+        "line": 355,
+        "end_line": 376
+      },
+      {
+        "name": "save_multiclass_roc",
+        "line": 379,
+        "end_line": 404
+      },
+      {
+        "name": "save_training_plot",
+        "line": 407,
+        "end_line": 421
+      },
+      {
+        "name": "_maybe_load_synth",
+        "line": 424,
+        "end_line": 428
+      },
+      {
+        "name": "_generate_synth_ctgan",
+        "line": 431,
+        "end_line": 544
+      },
+      {
+        "name": "main",
+        "line": 547,
+        "end_line": 776
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from dataclasses import dataclass",
+      "from pathlib import Path",
+      "from typing import Dict, List, Tuple",
+      "import matplotlib",
+      "import matplotlib.pyplot as plt",
+      "import numpy as np",
+      "import pandas as pd",
+      "import seaborn as sns",
+      "import tensorflow as tf",
+      "from sklearn.metrics import (\n    accuracy_score,\n    classification_report,\n    confusion_matrix,\n    matthews_corrcoef,\n    roc_curve,\n    auc,\n)",
+      "from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, label_binarize",
+      "from ctgan import CTGAN",
+      "import torch",
+      "import inspect"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/cnn_opt.py",
+    "lines": 1540,
+    "docstring": "cnn_opt.py \u2014 Optimized feature layout + CTGAN + Focal (NSL-KDD 5-class)\n----------------------------------------------------------------------\n\nWhat this script changes vs `cnn_fin.py`\n---------------------------------------\n- Uses an \"optimized\" feature-to-grid layout instead of the naive column order.\n  The idea: keep semantically related numeric features adjacent, and keep the\n  one-hot blocks (protocol/flag/service) contiguous, to make 2D conv locality\n  less arbitrary.\n\nWhat stays ON by default\n------------------------\n- CTGAN augmentation (expects a cached CSV, or can generate it)\n- Class-balanced focal loss with best sweep defaults:\n    cb_beta = 0.9999\n    focal_gamma = 1.5\n- Each training batch includes R2L and U2R by default\n- groups configurable (groups=1 => standard conv; groups>1 => grouped conv)\n- Validation-tuned class-specific score scaling:\n    search R2L/U2R coefficients on real validation records\n    freeze the selected pair before evaluating KDDTest+\n\nRecommended workflow\n--------------------\n1) Precompute CTGAN once (R2L-only recommended):\n   python -u src/cnn_opt.py --ctgan-train --ctgan-regenerate --ctgan-only --target-r2l 5000 --target-u2r 0\n\n2) Train/eval (uses cached synth by default):\n   python -u src/cnn_opt.py --epochs 25 --run-name opt_best",
+    "definitions": [
+      {
+        "name": "build_optimized_feature_order",
+        "line": 128,
+        "end_line": 158
+      },
+      {
+        "name": "save_feature_grid",
+        "line": 161,
+        "end_line": 166
+      },
+      {
+        "name": "ValF1Callback",
+        "line": 172,
+        "end_line": 194
+      },
+      {
+        "name": "apply_class_score_scaling",
+        "line": 197,
+        "end_line": 232
+      },
+      {
+        "name": "apply_prediction_thresholds",
+        "line": 235,
+        "end_line": 269
+      },
+      {
+        "name": "score_coefficient_values",
+        "line": 272,
+        "end_line": 300
+      },
+      {
+        "name": "parse_score_coefficient_values",
+        "line": 303,
+        "end_line": 321
+      },
+      {
+        "name": "score_scaling_metrics",
+        "line": 324,
+        "end_line": 372
+      },
+      {
+        "name": "search_score_coefficients",
+        "line": 375,
+        "end_line": 462
+      },
+      {
+        "name": "select_synth_for_targets",
+        "line": 465,
+        "end_line": 515
+      },
+      {
+        "name": "BalancedBatchSequence",
+        "line": 518,
+        "end_line": 597
+      },
+      {
+        "name": "build_opt_cnn",
+        "line": 600,
+        "end_line": 661
+      },
+      {
+        "name": "save_training_plot",
+        "line": 664,
+        "end_line": 681
+      },
+      {
+        "name": "main",
+        "line": 684,
+        "end_line": 1536
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from pathlib import Path",
+      "from typing import Dict, List, Tuple",
+      "import matplotlib",
+      "import matplotlib.pyplot as plt",
+      "import numpy as np",
+      "import pandas as pd",
+      "import tensorflow as tf",
+      "from sklearn.metrics import (\n    accuracy_score,\n    classification_report,\n    f1_score,\n    matthews_corrcoef,\n    recall_score,\n)",
+      "from sklearn.model_selection import train_test_split",
+      "from cnn_gan_foc import (  # type: ignore\n    CLASS_NAMES,\n    ClassBalancedFocalLoss,\n    _generate_synth_ctgan,\n    _maybe_load_synth,\n    _repo_paths,\n    apply_one_hot,\n    apply_scaler,\n    collapse_attack_labels,\n    compute_cb_alpha_effective_number,\n    fit_one_hot_encoders,\n    fit_scaler,\n    load_nsl_kdd_txt,\n    prepare_xy_from_processed,\n    save_confusion_matrices,\n    save_multiclass_roc,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/cnn_opt_1d_4gpu.py",
+    "lines": 904,
+    "docstring": "Conv1D/MLP/Transformer architecture baselines for cnn_opt with GPU training.\n\nThe data preparation, optimized feature order, CTGAN augmentation, focal loss,\nbalanced batches, validation metrics, thresholds, and training settings match\ncnn_opt.py. Conv1D reads the ordered features as a (121, 1) sequence. The MLP\nreads them as a flat vector. The Transformer treats each scalar feature as one\ntoken and adds a learned feature-position embedding.\n\nRun:\n    python -u src/cnn_opt_1d_4gpu.py --num-gpus 4 --epochs 25\n    python -u src/transformer_baseline.py --num-gpus 4 --epochs 25",
+    "definitions": [
+      {
+        "name": "AddLearnedPositionEmbedding",
+        "line": 60,
+        "end_line": 84
+      },
+      {
+        "name": "build_vanilla_transformer",
+        "line": 87,
+        "end_line": 198
+      },
+      {
+        "name": "build_opt_cnn_1d",
+        "line": 201,
+        "end_line": 267
+      },
+      {
+        "name": "build_opt_mlp",
+        "line": 270,
+        "end_line": 302
+      },
+      {
+        "name": "create_gpu_strategy",
+        "line": 305,
+        "end_line": 330
+      },
+      {
+        "name": "main",
+        "line": 333,
+        "end_line": 900
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from typing import Dict, List",
+      "import numpy as np",
+      "import pandas as pd",
+      "import tensorflow as tf",
+      "from sklearn.metrics import (\n    accuracy_score,\n    classification_report,\n    f1_score,\n    matthews_corrcoef,\n    recall_score,\n)",
+      "from sklearn.model_selection import train_test_split",
+      "from cnn_gan_foc import (  # type: ignore\n    CLASS_NAMES,\n    ClassBalancedFocalLoss,\n    _generate_synth_ctgan,\n    _maybe_load_synth,\n    _repo_paths,\n    apply_one_hot,\n    apply_scaler,\n    collapse_attack_labels,\n    compute_cb_alpha_effective_number,\n    fit_one_hot_encoders,\n    fit_scaler,\n    load_nsl_kdd_txt,\n    prepare_xy_from_processed,\n    save_confusion_matrices,\n    save_multiclass_roc,\n)",
+      "from cnn_opt import (  # type: ignore\n    BalancedBatchSequence,\n    ValF1Callback,\n    apply_prediction_thresholds,\n    build_optimized_feature_order,\n    save_feature_grid,\n    save_training_plot,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/compare_all_models.py",
+    "lines": 784,
+    "docstring": "Compare five fixed models on the same untouched KDDTest+ set.\n\nModels:\n  - MLP using the cnn_opt training pipeline\n  - standard XGBoost\n  - cost-sensitive XGBoost\n  - Conv1D using the cnn_opt training pipeline\n  - Conv2D from cnn_opt\n\nAll five use argmax predictions. Multiple paired seeds are summarized with\nmean and standard deviation. Conv1D's dense width is automatically adjusted\nto match Conv2D's parameter budget. Each GPU runs one child process at a time.",
+    "definitions": [
+      {
+        "name": "conv2d_parameter_count",
+        "line": 64,
+        "end_line": 78
+      },
+      {
+        "name": "conv1d_parameter_count",
+        "line": 81,
+        "end_line": 95
+      },
+      {
+        "name": "matched_conv1d_dense_units",
+        "line": 98,
+        "end_line": 123
+      },
+      {
+        "name": "parse_gpus",
+        "line": 126,
+        "end_line": 134
+      },
+      {
+        "name": "fingerprint_files",
+        "line": 137,
+        "end_line": 147
+      },
+      {
+        "name": "read_metrics",
+        "line": 150,
+        "end_line": 167
+      },
+      {
+        "name": "result_is_complete",
+        "line": 170,
+        "end_line": 177
+      },
+      {
+        "name": "add_shared_neural_arguments",
+        "line": 180,
+        "end_line": 219
+      },
+      {
+        "name": "build_command",
+        "line": 222,
+        "end_line": 294
+      },
+      {
+        "name": "training_description",
+        "line": 297,
+        "end_line": 311
+      },
+      {
+        "name": "main",
+        "line": 314,
+        "end_line": 780
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import importlib.util",
+      "import os",
+      "from pathlib import Path",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import pandas as pd"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/compare_cnn_1d_2d.py",
+    "lines": 533,
+    "docstring": "Compare Conv1D and Conv2D with shared hyperparameters and paired seeds.\n\nExample:\n    python -u src/compare_cnn_1d_2d.py       --configs 10       --seeds 0 1 2 3 4       --gpus 0 1 2 3       --epochs 25       --batch-size 256\n\nThe script randomly chooses shared configurations. For each configuration and\nseed, it runs both models on the same GPU. Existing completed runs are skipped,\nso rerunning the same command resumes an interrupted comparison.",
+    "definitions": [
+      {
+        "name": "parse_gpus",
+        "line": 75,
+        "end_line": 83
+      },
+      {
+        "name": "fingerprint_files",
+        "line": 86,
+        "end_line": 97
+      },
+      {
+        "name": "result_is_complete",
+        "line": 100,
+        "end_line": 107
+      },
+      {
+        "name": "build_command",
+        "line": 110,
+        "end_line": 155
+      },
+      {
+        "name": "parse_run",
+        "line": 158,
+        "end_line": 185
+      },
+      {
+        "name": "mean_and_std",
+        "line": 188,
+        "end_line": 194
+      },
+      {
+        "name": "build_summary",
+        "line": 197,
+        "end_line": 238
+      },
+      {
+        "name": "main",
+        "line": 241,
+        "end_line": 529
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import hashlib",
+      "import itertools",
+      "import os",
+      "import random",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "from pathlib import Path",
+      "from typing import Any, Dict, List, Sequence",
+      "import pandas as pd",
+      "from summarize_trials import parse_results_file"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/compare_cnn_opt_xgboost.py",
+    "lines": 228,
+    "docstring": "Train cnn_opt and cost-sensitive XGBoost, then compare both on KDDTest+.\n\nRun from the repository root:\n\n    CUDA_VISIBLE_DEVICES=0 python -u src/compare_cnn_opt_xgboost.py",
+    "definitions": [
+      {
+        "name": "read_metrics",
+        "line": 31,
+        "end_line": 44
+      },
+      {
+        "name": "run_command",
+        "line": 47,
+        "end_line": 50
+      },
+      {
+        "name": "main",
+        "line": 53,
+        "end_line": 224
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import csv",
+      "import importlib.util",
+      "import os",
+      "from pathlib import Path",
+      "import subprocess",
+      "import sys",
+      "from typing import Dict"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/cost_sensitive_xgboost.py",
+    "lines": 367,
+    "docstring": "Standard or cost-sensitive XGBoost baseline for NSL-KDD five-class.\n\nCost-sensitive mode gives each training row a balanced class weight:\n\n    weight(class c) = number_of_training_rows / (5 * rows_in_class_c)\n\nThis gives rare R2L/U2R rows more influence without changing KDDTest+.",
+    "definitions": [
+      {
+        "name": "load_processed_data",
+        "line": 63,
+        "end_line": 107
+      },
+      {
+        "name": "balanced_class_weights",
+        "line": 110,
+        "end_line": 116
+      },
+      {
+        "name": "calculate_metrics",
+        "line": 119,
+        "end_line": 139
+      },
+      {
+        "name": "main",
+        "line": 142,
+        "end_line": 363
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import csv",
+      "from typing import Dict, Tuple",
+      "import numpy as np",
+      "from sklearn.metrics import (\n    accuracy_score,\n    classification_report,\n    f1_score,\n    matthews_corrcoef,\n    recall_score,\n)",
+      "from sklearn.model_selection import train_test_split",
+      "from cnn_gan_foc import (  # type: ignore\n    CLASS_NAMES,\n    _repo_paths,\n    apply_one_hot,\n    apply_scaler,\n    collapse_attack_labels,\n    fit_one_hot_encoders,\n    fit_scaler,\n    load_nsl_kdd_txt,\n    save_confusion_matrices,\n    save_multiclass_roc,\n)",
+      "import xgboost as xgb",
+      "from xgboost import XGBClassifier"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/evaluate_cnn_grid_winner.py",
+    "lines": 367,
+    "docstring": "Evaluate one validation-selected cnn2d_grid winner on KDDTest+.\n\nThe script does not train or tune anything. It reads one shared R2L/U2R\ncoefficient pair from the multi-seed validation summary, loads every saved\nseed model for that configuration, and compares raw argmax with the same\nfrozen score-scaling rule.",
+    "definitions": [
+      {
+        "name": "resolve_path",
+        "line": 48,
+        "end_line": 52
+      },
+      {
+        "name": "mean_and_std",
+        "line": 55,
+        "end_line": 60
+      },
+      {
+        "name": "build_summary",
+        "line": 63,
+        "end_line": 90
+      },
+      {
+        "name": "format_percent",
+        "line": 93,
+        "end_line": 94
+      },
+      {
+        "name": "formatted_summary",
+        "line": 97,
+        "end_line": 118
+      },
+      {
+        "name": "main",
+        "line": 121,
+        "end_line": 363
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from pathlib import Path",
+      "from typing import Any, Dict, List",
+      "import numpy as np",
+      "import pandas as pd",
+      "import tensorflow as tf",
+      "from cnn_opt import apply_class_score_scaling, score_scaling_metrics",
+      "from tune_cnn_opt_thresholds import (\n    load_validation_and_test,\n    read_metadata,\n    read_saved_counts,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/evaluate_final_natural_rare_super_stack_kddtest.py",
+    "lines": 1045,
+    "docstring": "Evaluate frozen natural-Rare-F1 Super-Stack winners on KDDTest+.\n\nThis is a CPU-only final-test postprocessor.  It does not retrain any neural\nbackbone.  For each architecture and seed it:\n\n1. validates the immutable all-OOF ranking produced by experiment\n   ``6c7924f8d3a8``;\n2. verifies that the predeclared candidate is the eligible winner when\n   ordinary KDDTrain+ OOF Rare F1 is the primary selection metric;\n3. refits only that candidate's temperature scalars, feature standardizer,\n   and multinomial logistic stacker on all saved KDDTrain+ OOF predictions;\n4. applies the frozen meta-model, blend, and rare-class offsets to the\n   already-saved raw KDDTest+ probabilities for General, Focal, and Batching;\n5. reports the frozen Super-Stack beside simple probability averaging.\n\nKDDTest+ labels are used only after every configuration has been validated and\nfrozen from KDDTrain+.  Because earlier KDDTest+ results motivated this later\nfusion study, the output is explicitly a post-hoc generalization analysis and\nnot a pristine untouched-test claim.\n\nExamples:\n\n    python -u src/evaluate_final_natural_rare_super_stack_kddtest.py --dry-run\n    python -u src/evaluate_final_natural_rare_super_stack_kddtest.py",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 118,
+        "end_line": 120
+      },
+      {
+        "name": "bool_series",
+        "line": 123,
+        "end_line": 130
+      },
+      {
+        "name": "natural_ranking",
+        "line": 133,
+        "end_line": 157
+      },
+      {
+        "name": "validate_scalar",
+        "line": 160,
+        "end_line": 180
+      },
+      {
+        "name": "load_search_protocol",
+        "line": 183,
+        "end_line": 213
+      },
+      {
+        "name": "ranking_paths",
+        "line": 216,
+        "end_line": 221
+      },
+      {
+        "name": "load_frozen_natural_config",
+        "line": 224,
+        "end_line": 289
+      },
+      {
+        "name": "normalized_seed_map",
+        "line": 292,
+        "end_line": 293
+      },
+      {
+        "name": "validate_oof_lineage",
+        "line": 296,
+        "end_line": 319
+      },
+      {
+        "name": "predict_with_fitted_state",
+        "line": 322,
+        "end_line": 405
+      },
+      {
+        "name": "aggregate_metrics",
+        "line": 408,
+        "end_line": 451
+      },
+      {
+        "name": "formatted_summary",
+        "line": 454,
+        "end_line": 464
+      },
+      {
+        "name": "paired_deltas",
+        "line": 467,
+        "end_line": 505
+      },
+      {
+        "name": "parse_arguments",
+        "line": 508,
+        "end_line": 575
+      },
+      {
+        "name": "main",
+        "line": 578,
+        "end_line": 1041
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from dataclasses import asdict",
+      "import hashlib",
+      "import json",
+      "from pathlib import Path",
+      "import time",
+      "from typing import Any, Dict, Mapping, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "from threadpoolctl import threadpool_limits",
+      "import evaluate_final_simple_average_vs_safe_stack_kddtest as final_sources",
+      "import run_final_baseline_vs_full_kddtest_4gpu as final_core",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_robust_calibrated_super_stack_all as stack"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/evaluate_final_simple_average_vs_safe_stack_kddtest.py",
+    "lines": 1066,
+    "docstring": "Evaluate frozen simple-average and SAFE-Stack decisions on KDDTest+.\n\nThis is a CPU-only postprocessor for the already completed final neural-model\nruns.  It reuses the raw KDDTest+ probability vectors produced by three fixed\nexperts for each architecture and seed:\n\n* General: cross-entropy with ordinary shuffled batches (``baseline``).\n* Focal: class-balanced focal loss with ordinary batches (``focal_only``).\n* Batching: cross-entropy with minority-guaranteed batches (``batch_only``).\n\nThe script evaluates two predeclared decision policies without retraining:\n\n* arithmetic mean of the three unscaled probability vectors, then argmax;\n* the architecture-specific SAFE-Stack configuration frozen on KDDTrain+ OOF\n  predictions before this final evaluation.\n\nNo configuration is selected, ranked, or changed using KDDTest+.  Historical\n``*_latest.json`` pointers are deliberately not used for source final runs,\nbecause architecture-subset runs can overwrite them.  Immutable hashed result\nartifacts are discovered instead, and ambiguous distinct runs cause an error.",
+    "definitions": [
+      {
+        "name": "SelectedSource",
+        "line": 107,
+        "end_line": 120
+      },
+      {
+        "name": "LoadedSource",
+        "line": 124,
+        "end_line": 128
+      },
+      {
+        "name": "stable_hash",
+        "line": 131,
+        "end_line": 133
+      },
+      {
+        "name": "read_json",
+        "line": 136,
+        "end_line": 142
+      },
+      {
+        "name": "unique_paths",
+        "line": 145,
+        "end_line": 153
+      },
+      {
+        "name": "resolve_prediction_path",
+        "line": 156,
+        "end_line": 194
+      },
+      {
+        "name": "cache_metadata_path_for_result",
+        "line": 197,
+        "end_line": 202
+      },
+      {
+        "name": "cache_identity",
+        "line": 205,
+        "end_line": 221
+      },
+      {
+        "name": "parse_source_overrides",
+        "line": 224,
+        "end_line": 247
+      },
+      {
+        "name": "load_frozen_safe_config",
+        "line": 250,
+        "end_line": 300
+      },
+      {
+        "name": "candidate_result_paths",
+        "line": 303,
+        "end_line": 307
+      },
+      {
+        "name": "validate_source_metadata",
+        "line": 310,
+        "end_line": 370
+      },
+      {
+        "name": "select_sources",
+        "line": 373,
+        "end_line": 524
+      },
+      {
+        "name": "load_prediction",
+        "line": 527,
+        "end_line": 573
+      },
+      {
+        "name": "aggregate_metrics",
+        "line": 576,
+        "end_line": 617
+      },
+      {
+        "name": "formatted_summary",
+        "line": 620,
+        "end_line": 630
+      },
+      {
+        "name": "paired_deltas",
+        "line": 633,
+        "end_line": 669
+      },
+      {
+        "name": "parse_arguments",
+        "line": 672,
+        "end_line": 730
+      },
+      {
+        "name": "main",
+        "line": 733,
+        "end_line": 1062
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from dataclasses import dataclass",
+      "import hashlib",
+      "import json",
+      "from pathlib import Path",
+      "import time",
+      "from typing import Any, Dict, Iterable, Mapping, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_final_baseline_vs_full_kddtest_4gpu as final_core",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_conv2d_safe_stack_fusion as fusion"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/grid_search_cnn_opt_4gpu.py",
+    "lines": 1074,
+    "docstring": "Exhaustive Conv2D hyperparameter search using one independent job per GPU.\n\nThe expensive grid dimensions (R2L synthetic rows, beta, gamma) retrain the\nCNN. Each trained model scores every R2L/U2R coefficient pair on its real\nvalidation predictions without retraining. The same full hyperparameter\ncombination is then averaged across all requested seeds before ranking.\n\nTypical run from the repository root:\n\n    python -u src/grid_search_cnn_opt_4gpu.py       --gpus 0 1 2 3       --seeds 0 1 2       --prepare-synth",
+    "definitions": [
+      {
+        "name": "parse_int_csv",
+        "line": 144,
+        "end_line": 159
+      },
+      {
+        "name": "parse_float_csv",
+        "line": 162,
+        "end_line": 179
+      },
+      {
+        "name": "parse_gpus",
+        "line": 182,
+        "end_line": 192
+      },
+      {
+        "name": "slug",
+        "line": 195,
+        "end_line": 196
+      },
+      {
+        "name": "fingerprint_files",
+        "line": 199,
+        "end_line": 212
+      },
+      {
+        "name": "count_real_r2l",
+        "line": 215,
+        "end_line": 222
+      },
+      {
+        "name": "count_pool_r2l",
+        "line": 225,
+        "end_line": 235
+      },
+      {
+        "name": "prepare_synth_pool",
+        "line": 238,
+        "end_line": 279
+      },
+      {
+        "name": "required_float",
+        "line": 282,
+        "end_line": 286
+      },
+      {
+        "name": "result_is_complete",
+        "line": 289,
+        "end_line": 338
+      },
+      {
+        "name": "build_command",
+        "line": 341,
+        "end_line": 388
+      },
+      {
+        "name": "parse_completed_run",
+        "line": 391,
+        "end_line": 426
+      },
+      {
+        "name": "mean_and_std",
+        "line": 429,
+        "end_line": 435
+      },
+      {
+        "name": "build_summary",
+        "line": 438,
+        "end_line": 462
+      },
+      {
+        "name": "load_coefficient_grid",
+        "line": 465,
+        "end_line": 515
+      },
+      {
+        "name": "build_shared_coefficient_summary",
+        "line": 518,
+        "end_line": 584
+      },
+      {
+        "name": "select_best_pair_per_training_config",
+        "line": 587,
+        "end_line": 602
+      },
+      {
+        "name": "main",
+        "line": 605,
+        "end_line": 1070
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import itertools",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "from summarize_trials import parse_results_file"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/random_search_cnn_opt_1d.py",
+    "lines": 246,
+    "docstring": "Random hyperparameter search for cnn_opt_1d_4gpu.py.\n\nEach training run uses all requested GPUs. Configurations run one after another\nso they do not compete for the same GPUs.\n\nExample:\n    python -u src/random_search_cnn_opt_1d.py       --trials 12       --seeds 0 1 2       --auto-summarize",
+    "definitions": [
+      {
+        "name": "parse_float_list",
+        "line": 26,
+        "end_line": 27
+      },
+      {
+        "name": "parse_int_list",
+        "line": 30,
+        "end_line": 31
+      },
+      {
+        "name": "slug",
+        "line": 34,
+        "end_line": 35
+      },
+      {
+        "name": "main",
+        "line": 38,
+        "end_line": 242
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import csv",
+      "import itertools",
+      "import random",
+      "import subprocess",
+      "import sys",
+      "from pathlib import Path",
+      "from typing import List"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_cnn_ablation_4gpu.py",
+    "lines": 789,
+    "docstring": "Run the six-row CNN ablation table with paired seeds on four GPUs.\n\nThe comparison uses one shared cnn_opt preprocessing/backbone so each row\nchanges only the named training technique. Five models are trained per seed;\nthe sixth row (Integrated+Batch+Tuning) reuses the Integrated+Batch model and\nchanges only its fixed post-training decision rule.\n\nTypical run from the repository root:\n\n    python -u src/run_cnn_ablation_4gpu.py       --gpus 0 1 2 3       --seeds 0 1 2       --prepare-synth",
+    "definitions": [
+      {
+        "name": "required_float",
+        "line": 82,
+        "end_line": 89
+      },
+      {
+        "name": "training_configurations",
+        "line": 92,
+        "end_line": 143
+      },
+      {
+        "name": "build_command",
+        "line": 146,
+        "end_line": 203
+      },
+      {
+        "name": "result_is_complete",
+        "line": 206,
+        "end_line": 263
+      },
+      {
+        "name": "metric_row",
+        "line": 266,
+        "end_line": 286
+      },
+      {
+        "name": "expand_result_rows",
+        "line": 289,
+        "end_line": 319
+      },
+      {
+        "name": "mean_and_std",
+        "line": 322,
+        "end_line": 327
+      },
+      {
+        "name": "build_summary",
+        "line": 330,
+        "end_line": 360
+      },
+      {
+        "name": "format_percent",
+        "line": 363,
+        "end_line": 364
+      },
+      {
+        "name": "formatted_summary",
+        "line": 367,
+        "end_line": 388
+      },
+      {
+        "name": "main",
+        "line": 391,
+        "end_line": 785
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "from grid_search_cnn_opt_4gpu import (\n    count_pool_r2l,\n    count_real_r2l,\n    fingerprint_files,\n    parse_gpus,\n    prepare_synth_pool,\n)",
+      "from summarize_trials import parse_results_file"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_conv1d_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Run the pure Conv1D baseline with four-fold, three-seed OOF evaluation.\n\nThe fixed Conv1D backbone and training budget match the controlled comparison.\nNo imbalance enhancement is used: training uses ordinary sparse cross-entropy,\nshuffled mini-batches, no synthetic data, and raw multiclass argmax.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_conv1d_batch_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate Conv1D with cross-entropy plus minority-guaranteed batches only.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_conv1d_focal_batch_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate Conv1D with selected focal loss plus minority-guaranteed batches.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_conv2d_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Run the pure Conv2D baseline with four-fold, three-seed OOF evaluation.\n\nThe Conv2D backbone and training budget stay fixed for a fair comparison.  This\nbaseline deliberately uses no imbalance enhancement: ordinary sparse\ncross-entropy, shuffled mini-batches, no synthetic data, and raw argmax.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_conv2d_batch_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate Conv2D with cross-entropy plus minority-guaranteed batches only.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_conv2d_focal_batch_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate Conv2D with selected focal loss plus minority-guaranteed batches.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_ctgan_amount_sweep_4gpu.py",
+    "lines": 1758,
+    "docstring": "Leakage-free CTGAN augmentation-amount sweep on KDDTrain+ validation folds.\n\nFor every seed, this script first creates a stratified 80/20 split of the\nreal KDDTrain+ records. One conditional CTGAN is fitted only on the 80%\ntraining fold and produces two separate nested pools: 5,000 R2L rows and\n5,000 U2R rows. The following seven Conv2D conditions are then trained:\n\n    no synthetic data;\n    U2R-only 500, 1,000, and 5,000;\n    R2L-only 500, 1,000, and 5,000.\n\nThe held-out 20% fold is always real. KDDTest+ is never loaded by this file.\nOne independent child process is assigned to each GPU at a time.",
+    "definitions": [
+      {
+        "name": "parse_gpus",
+        "line": 168,
+        "end_line": 176
+      },
+      {
+        "name": "sha256_file",
+        "line": 179,
+        "end_line": 187
+      },
+      {
+        "name": "sha256_indices",
+        "line": 190,
+        "end_line": 192
+      },
+      {
+        "name": "source_fingerprint",
+        "line": 195,
+        "end_line": 208
+      },
+      {
+        "name": "atomic_json",
+        "line": 211,
+        "end_line": 218
+      },
+      {
+        "name": "atomic_csv",
+        "line": 221,
+        "end_line": 225
+      },
+      {
+        "name": "atomic_npz",
+        "line": 228,
+        "end_line": 233
+      },
+      {
+        "name": "read_json",
+        "line": 236,
+        "end_line": 237
+      },
+      {
+        "name": "package_version",
+        "line": 240,
+        "end_line": 244
+      },
+      {
+        "name": "load_real_kddtrain",
+        "line": 247,
+        "end_line": 257
+      },
+      {
+        "name": "split_indices",
+        "line": 260,
+        "end_line": 277
+      },
+      {
+        "name": "pool_paths",
+        "line": 280,
+        "end_line": 292
+      },
+      {
+        "name": "condition_name",
+        "line": 295,
+        "end_line": 296
+      },
+      {
+        "name": "condition_order",
+        "line": 299,
+        "end_line": 304
+      },
+      {
+        "name": "effective_ctgan_batch_size",
+        "line": 307,
+        "end_line": 309
+      },
+      {
+        "name": "build_conditions",
+        "line": 312,
+        "end_line": 325
+      },
+      {
+        "name": "expected_pool_metadata",
+        "line": 328,
+        "end_line": 352
+      },
+      {
+        "name": "pool_is_complete",
+        "line": 355,
+        "end_line": 387
+      },
+      {
+        "name": "run_generate_worker",
+        "line": 390,
+        "end_line": 517
+      },
+      {
+        "name": "fixed_one_hot_encoders",
+        "line": 520,
+        "end_line": 536
+      },
+      {
+        "name": "calculate_validation_metrics",
+        "line": 539,
+        "end_line": 586
+      },
+      {
+        "name": "run_train_worker",
+        "line": 589,
+        "end_line": 947
+      },
+      {
+        "name": "result_is_complete",
+        "line": 950,
+        "end_line": 1019
+      },
+      {
+        "name": "build_worker_command",
+        "line": 1022,
+        "end_line": 1104
+      },
+      {
+        "name": "run_gpu_phase",
+        "line": 1107,
+        "end_line": 1170
+      },
+      {
+        "name": "summarize_results",
+        "line": 1173,
+        "end_line": 1318
+      },
+      {
+        "name": "main",
+        "line": 1321,
+        "end_line": 1754
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import importlib.metadata",
+      "import inspect",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import tempfile",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "from cnn_gan_foc import (  # type: ignore\n        collapse_attack_labels,\n        load_nsl_kdd_txt,\n    )",
+      "from sklearn.model_selection import train_test_split",
+      "import torch",
+      "from cnn_gan_foc import _generate_synth_ctgan",
+      "from sklearn.preprocessing import OneHotEncoder",
+      "from sklearn.metrics import (\n        accuracy_score,\n        f1_score,\n        matthews_corrcoef,\n        precision_score,\n        recall_score,\n    )",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import (  # type: ignore\n        ClassBalancedFocalLoss,\n        apply_one_hot,\n        apply_scaler,\n        compute_cb_alpha_effective_number,\n        fit_scaler,\n    )",
+      "from cnn_opt import (  # type: ignore\n        BalancedBatchSequence,\n        ValF1Callback,\n        build_opt_cnn,\n        build_optimized_feature_order,\n    )"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_final_baseline_vs_full_kddtest_4gpu.py",
+    "lines": 1056,
+    "docstring": "Final KDDTest+ comparison of pure and fully equipped neural models.\n\nAll model and imbalance-control settings in this file are frozen constants from\nthe earlier KDDTrain+ cross-validation experiments.  For every architecture and\nseed, the script trains once on all of KDDTrain+ and evaluates once on untouched\nKDDTest+.  It does not tune, checkpoint, or select anything using KDDTest+.\n\nSupported variants\n------------------\nbaseline\n    Cross-entropy, ordinary shuffled mini-batches, raw multiclass argmax.\nfocal_only\n    Class-balanced focal loss, ordinary shuffled mini-batches, raw argmax.\nbatch_only\n    Cross-entropy, minority-guaranteed mini-batches, raw argmax.\nscaling_only\n    Cross-entropy, ordinary shuffled mini-batches, frozen score scaling.\nfull\n    Class-balanced focal loss, one guaranteed R2L and U2R example per batch,\n    and the architecture-specific frozen class-score coefficients.\n\nThe controller runs independent fits concurrently, one process per GPU.  Child\nprocesses see exactly one CUDA device and therefore hold one complete model.",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 142,
+        "end_line": 144
+      },
+      {
+        "name": "progress_bar",
+        "line": 147,
+        "end_line": 153
+      },
+      {
+        "name": "resolve_cuda_tokens",
+        "line": 156,
+        "end_line": 173
+      },
+      {
+        "name": "reshape_features",
+        "line": 176,
+        "end_line": 184
+      },
+      {
+        "name": "build_model",
+        "line": 187,
+        "end_line": 237
+      },
+      {
+        "name": "prepare_train_test_cache",
+        "line": 240,
+        "end_line": 301
+      },
+      {
+        "name": "run_worker",
+        "line": 304,
+        "end_line": 525
+      },
+      {
+        "name": "result_is_complete",
+        "line": 528,
+        "end_line": 554
+      },
+      {
+        "name": "build_worker_command",
+        "line": 557,
+        "end_line": 598
+      },
+      {
+        "name": "aggregate_results",
+        "line": 601,
+        "end_line": 755
+      },
+      {
+        "name": "parse_arguments",
+        "line": 758,
+        "end_line": 802
+      },
+      {
+        "name": "main",
+        "line": 805,
+        "end_line": 1052
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "from cnn_opt import build_opt_cnn",
+      "from cnn_opt_1d_4gpu import (  # type: ignore\n        build_opt_cnn_1d,\n        build_opt_mlp,\n        build_vanilla_transformer,\n    )",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt import BalancedBatchSequence"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_final_single_enhancements_kddtest_4gpu.py",
+    "lines": 29,
+    "docstring": "Run all single-enhancement neural ablations on final KDDTest+.\n\nThis is the simple entry point for the paper experiment. It evaluates, for\nConv2D, Conv1D, Transformer, and MLP across seeds 0, 1, and 2:\n\n1. model + class-balanced focal loss only;\n2. model + minority-guaranteed mini-batches only;\n3. model + frozen class-score scaling only.\n\nThe implementation and frozen settings live in the shared final-test runner.",
+    "definitions": [],
+    "imports": [
+      "from __future__ import annotations",
+      "import sys",
+      "from run_final_baseline_vs_full_kddtest_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_mlp_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Run the pure MLP baseline with four-fold, three-seed OOF evaluation.\n\nThe fixed parameter-matched MLP and training budget remain unchanged.  No\nimbalance enhancement is used: training uses ordinary sparse cross-entropy,\nshuffled mini-batches, no synthetic data, and raw multiclass argmax.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_mlp_batch_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate MLP with cross-entropy plus minority-guaranteed batches only.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_mlp_focal_batch_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate MLP with selected focal loss plus minority-guaranteed batches.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_no_ctgan_model_ablation_4gpu.py",
+    "lines": 2513,
+    "docstring": "Run a leakage-controlled, no-CTGAN ablation for CNN, Transformer, and XGBoost.\n\nEvery seed starts by splitting raw KDDTrain+ rows into a stratified 80/20\ntraining/validation fold. The fixed 121-feature encoder and MinMax scaler are\nfit on the 80% fold only. KDDTest+ is not loaded or transformed until the model\nhas finished training and any score-scaling coefficients have been selected\nfrom validation probabilities.\n\nEight unique models are trained per seed and expanded into eleven report rows:\n\n  CNN:         CE; focal; focal+minority batches; same batch model+scaling\n  Transformer: CE; focal; focal+minority batches; same batch model+scaling\n  XGBoost:     standard; balanced weights; same weighted model+scaling\n\nThe score-scaled rows reuse the exact trained model and only change the frozen\npost-training decision rule. No synthetic file is read and no synthetic row is\nused anywhere in this script.",
+    "definitions": [
+      {
+        "name": "parse_gpus",
+        "line": 439,
+        "end_line": 447
+      },
+      {
+        "name": "sha256_file",
+        "line": 450,
+        "end_line": 455
+      },
+      {
+        "name": "fingerprint_files",
+        "line": 458,
+        "end_line": 466
+      },
+      {
+        "name": "sha256_indices",
+        "line": 469,
+        "end_line": 471
+      },
+      {
+        "name": "sha256_array",
+        "line": 474,
+        "end_line": 480
+      },
+      {
+        "name": "package_version",
+        "line": 483,
+        "end_line": 487
+      },
+      {
+        "name": "version_major",
+        "line": 490,
+        "end_line": 492
+      },
+      {
+        "name": "validate_runtime_dependencies",
+        "line": 495,
+        "end_line": 527
+      },
+      {
+        "name": "atomic_json",
+        "line": 530,
+        "end_line": 537
+      },
+      {
+        "name": "atomic_npz",
+        "line": 540,
+        "end_line": 545
+      },
+      {
+        "name": "atomic_csv",
+        "line": 548,
+        "end_line": 552
+      },
+      {
+        "name": "read_json",
+        "line": 555,
+        "end_line": 556
+      },
+      {
+        "name": "load_collapsed_nsl_kdd",
+        "line": 559,
+        "end_line": 627
+      },
+      {
+        "name": "split_raw_indices",
+        "line": 630,
+        "end_line": 647
+      },
+      {
+        "name": "build_optimized_feature_order",
+        "line": 650,
+        "end_line": 673
+      },
+      {
+        "name": "fit_fold_preprocessor",
+        "line": 676,
+        "end_line": 707
+      },
+      {
+        "name": "apply_fold_preprocessor_one_hot",
+        "line": 710,
+        "end_line": 724
+      },
+      {
+        "name": "transform_with_fold_preprocessor",
+        "line": 727,
+        "end_line": 745
+      },
+      {
+        "name": "calculate_metrics",
+        "line": 748,
+        "end_line": 778
+      },
+      {
+        "name": "apply_class_score_scaling",
+        "line": 781,
+        "end_line": 797
+      },
+      {
+        "name": "score_coefficient_values",
+        "line": 800,
+        "end_line": 813
+      },
+      {
+        "name": "score_scaling_rank_metrics",
+        "line": 816,
+        "end_line": 831
+      },
+      {
+        "name": "search_score_coefficients",
+        "line": 834,
+        "end_line": 892
+      },
+      {
+        "name": "balanced_class_weights",
+        "line": 895,
+        "end_line": 901
+      },
+      {
+        "name": "effective_number_alpha",
+        "line": 904,
+        "end_line": 916
+      },
+      {
+        "name": "configuration_by_id",
+        "line": 919,
+        "end_line": 923
+      },
+      {
+        "name": "prepare_fold_data",
+        "line": 926,
+        "end_line": 974
+      },
+      {
+        "name": "train_neural_model",
+        "line": 977,
+        "end_line": 1166
+      },
+      {
+        "name": "train_xgboost_model",
+        "line": 1169,
+        "end_line": 1262
+      },
+      {
+        "name": "predict_probabilities",
+        "line": 1265,
+        "end_line": 1288
+      },
+      {
+        "name": "run_training_worker",
+        "line": 1291,
+        "end_line": 1505
+      },
+      {
+        "name": "metrics_are_complete",
+        "line": 1508,
+        "end_line": 1515
+      },
+      {
+        "name": "metrics_match_predictions",
+        "line": 1518,
+        "end_line": 1534
+      },
+      {
+        "name": "prediction_artifact_is_complete",
+        "line": 1537,
+        "end_line": 1645
+      },
+      {
+        "name": "result_is_complete",
+        "line": 1648,
+        "end_line": 1704
+      },
+      {
+        "name": "build_worker_command",
+        "line": 1707,
+        "end_line": 1808
+      },
+      {
+        "name": "build_all_run_rows",
+        "line": 1811,
+        "end_line": 1858
+      },
+      {
+        "name": "build_summary",
+        "line": 1861,
+        "end_line": 1883
+      },
+      {
+        "name": "build_paired_deltas",
+        "line": 1886,
+        "end_line": 1909
+      },
+      {
+        "name": "format_percent",
+        "line": 1912,
+        "end_line": 1913
+      },
+      {
+        "name": "formatted_summary",
+        "line": 1916,
+        "end_line": 1941
+      },
+      {
+        "name": "add_arguments",
+        "line": 1944,
+        "end_line": 2013
+      },
+      {
+        "name": "validate_arguments",
+        "line": 2016,
+        "end_line": 2097
+      },
+      {
+        "name": "experiment_settings",
+        "line": 2100,
+        "end_line": 2156
+      },
+      {
+        "name": "main",
+        "line": 2159,
+        "end_line": 2509
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import importlib.metadata",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import re",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import tempfile",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "from sklearn.model_selection import train_test_split",
+      "from sklearn.preprocessing import MinMaxScaler, OneHotEncoder",
+      "from sklearn.metrics import (\n        accuracy_score,\n        f1_score,\n        matthews_corrcoef,\n        precision_score,\n        recall_score,\n    )",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt import (  # type: ignore\n        BalancedBatchSequence,\n        ValF1Callback,\n        build_opt_cnn,\n    )",
+      "from cnn_opt_1d_4gpu import build_vanilla_transformer",
+      "import xgboost as xgb",
+      "import xgboost as xgb",
+      "from xgboost import XGBClassifier"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_transformer_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Run the pure Transformer baseline with four-fold, three-seed OOF evaluation.\n\nThe fixed parameter-matched Transformer and training budget remain unchanged.\nNo imbalance enhancement is used: training uses ordinary sparse cross-entropy,\nshuffled mini-batches, no synthetic data, and raw multiclass argmax.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_transformer_batch_baseline_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate Transformer with cross-entropy plus minority batches only.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/run_transformer_focal_batch_cv_4gpu.py",
+    "lines": 12,
+    "docstring": "Evaluate Transformer with focal loss plus minority-guaranteed batches.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/select_fusion_against_all_validation_baselines.py",
+    "lines": 1524,
+    "docstring": "Select and audit fusion rules against four validation-only baselines.\n\nThis script reuses the completed Robust Calibrated Super-Stack rankings from\nexperiment ``6c7924f8d3a8``.  For each architecture it compares fusion against\nfour standalone KDDTrain+ OOF policies:\n\n* General (cross-entropy baseline),\n* focal-only,\n* minority-batching-only, and\n* validation-selected score scaling of the General probabilities.\n\nA fusion passes when its mean Rare F1 is at least ``--minimum-improvement``\nabove every standalone policy.  Rare F1 is the only eligibility and ranking\nmetric.  Existing Macro-F1/MCC guard columns are deliberately ignored.\n\nThe script also audits the selection rule with four outer folds.  Within each\nouter round, scaling and fusion are selected using only the other three folds;\nthe selected policies are then evaluated on the held-out fold.  No backbone is\nretrained, no GPU is used, and KDDTest+ is never accessed.\n\nExamples:\n\n    python -u src/select_fusion_against_all_validation_baselines.py --dry-run\n    python -u src/select_fusion_against_all_validation_baselines.py",
+    "definitions": [
+      {
+        "name": "ScalingSource",
+        "line": 67,
+        "end_line": 77
+      },
+      {
+        "name": "stable_hash",
+        "line": 80,
+        "end_line": 82
+      },
+      {
+        "name": "read_json",
+        "line": 85,
+        "end_line": 91
+      },
+      {
+        "name": "bool_series",
+        "line": 94,
+        "end_line": 101
+      },
+      {
+        "name": "resolve_recorded_path",
+        "line": 104,
+        "end_line": 124
+      },
+      {
+        "name": "load_search_protocol",
+        "line": 127,
+        "end_line": 157
+      },
+      {
+        "name": "normalized_seed_map",
+        "line": 160,
+        "end_line": 161
+      },
+      {
+        "name": "validate_oof_lineage",
+        "line": 164,
+        "end_line": 186
+      },
+      {
+        "name": "ranking_path",
+        "line": 189,
+        "end_line": 192
+      },
+      {
+        "name": "validate_final_ranking_hash",
+        "line": 195,
+        "end_line": 219
+      },
+      {
+        "name": "validate_ranking",
+        "line": 222,
+        "end_line": 343
+      },
+      {
+        "name": "true_fusion_mask",
+        "line": 346,
+        "end_line": 349
+      },
+      {
+        "name": "select_best_fusion",
+        "line": 352,
+        "end_line": 400
+      },
+      {
+        "name": "passes_minimum_gain",
+        "line": 403,
+        "end_line": 419
+      },
+      {
+        "name": "nested_acceptance",
+        "line": 422,
+        "end_line": 444
+      },
+      {
+        "name": "validate_fixed_ranking_rows",
+        "line": 447,
+        "end_line": 468
+      },
+      {
+        "name": "aggregate_prediction_metrics",
+        "line": 471,
+        "end_line": 492
+      },
+      {
+        "name": "standalone_metrics",
+        "line": 495,
+        "end_line": 527
+      },
+      {
+        "name": "scaling_ranking",
+        "line": 530,
+        "end_line": 601
+      },
+      {
+        "name": "scaled_predictions",
+        "line": 604,
+        "end_line": 615
+      },
+      {
+        "name": "load_scaling_source",
+        "line": 618,
+        "end_line": 701
+      },
+      {
+        "name": "validate_stored_scaling_winner",
+        "line": 704,
+        "end_line": 725
+      },
+      {
+        "name": "baseline_metrics_with_scaling",
+        "line": 728,
+        "end_line": 748
+      },
+      {
+        "name": "outer_split_indices",
+        "line": 751,
+        "end_line": 769
+      },
+      {
+        "name": "refit_outer_candidate",
+        "line": 772,
+        "end_line": 799
+      },
+      {
+        "name": "selection_row",
+        "line": 802,
+        "end_line": 848
+      },
+      {
+        "name": "parse_arguments",
+        "line": 851,
+        "end_line": 907
+      },
+      {
+        "name": "main",
+        "line": 910,
+        "end_line": 1520
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from dataclasses import asdict, dataclass",
+      "import hashlib",
+      "import json",
+      "from pathlib import Path",
+      "import time",
+      "from typing import Any, Dict, Mapping, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "from threadpoolctl import threadpool_limits",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_conv2d_score_scaling_cv_4gpu as scaling",
+      "import tune_robust_calibrated_super_stack_all as stack"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/summarize_trials.py",
+    "lines": 344,
+    "docstring": "Summarize many `results/*_results.txt` files from cnn_fin.py into a ranked table.\n\nTypical usage (from repo root):\n  python -u src/summarize_trials.py --glob \"fin_g1_*_results.txt\"\n\nOutputs:\n  - results/trials_raw.csv      (one row per run)\n  - results/trials_summary.csv  (grouped by cb_beta/focal_gamma/groups by default)",
+    "definitions": [
+      {
+        "name": "ParsedRun",
+        "line": 24,
+        "end_line": 26
+      },
+      {
+        "name": "_safe_float",
+        "line": 32,
+        "end_line": 36
+      },
+      {
+        "name": "_safe_int",
+        "line": 39,
+        "end_line": 43
+      },
+      {
+        "name": "_parse_key_value",
+        "line": 46,
+        "end_line": 119
+      },
+      {
+        "name": "_parse_classification_report",
+        "line": 122,
+        "end_line": 185
+      },
+      {
+        "name": "_parse_run_name_from_filename",
+        "line": 188,
+        "end_line": 198
+      },
+      {
+        "name": "parse_results_file",
+        "line": 201,
+        "end_line": 230
+      },
+      {
+        "name": "_mean_std",
+        "line": 233,
+        "end_line": 239
+      },
+      {
+        "name": "_write_csv",
+        "line": 242,
+        "end_line": 248
+      },
+      {
+        "name": "main",
+        "line": 251,
+        "end_line": 340
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import csv",
+      "import re",
+      "import statistics",
+      "from dataclasses import dataclass",
+      "from pathlib import Path",
+      "from typing import Any, Dict, List, Optional, Tuple"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/sweep_fixed_backbone_imbalance_4gpu.py",
+    "lines": 1878,
+    "docstring": "Seeded imbalance-control sweep for five fixed NSL-KDD model backbones.\n\nThis script deliberately does not tune architecture hyperparameters and never\nloads KDDTest+.  For each neural backbone it trains every declared (beta,\nfocal-gamma) pair on the same three seed-specific, stratified KDDTrain+ folds.\nThe two fixed XGBoost variants are trained on those folds as well.  Validation\nprobabilities are retained, then every R2L/U2R score-scaling pair is evaluated\nwith the same pair applied to all requested seeds.\n\nDefault fixed families:\n  - parameter-matched Conv1D\n  - compact Conv2D\n  - compact Transformer\n  - standard XGBoost\n  - cost-sensitive XGBoost\n\nDefault search size:\n  3 neural families * 8 betas * 8 focal gammas * 3 seeds = 576 fits\n  2 XGBoost families * 3 seeds                              =   6 fits\n  total                                                     = 582 fits\n\nThe 40 x 40 score grid does not retrain a model.  It is evaluated from saved\nvalidation probabilities with chunked NumPy confusion matrices.  Rankings are\ncomputed separately for every family and report mean +/- sample standard\ndeviation, including R2L/U2R precision, recall, and F1.",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 129,
+        "end_line": 131
+      },
+      {
+        "name": "build_training_configurations",
+        "line": 134,
+        "end_line": 185
+      },
+      {
+        "name": "atomic_csv",
+        "line": 188,
+        "end_line": 197
+      },
+      {
+        "name": "metrics_from_confusions",
+        "line": 200,
+        "end_line": 264
+      },
+      {
+        "name": "score_pair_confusions",
+        "line": 267,
+        "end_line": 338
+      },
+      {
+        "name": "train_neural_configuration",
+        "line": 341,
+        "end_line": 514
+      },
+      {
+        "name": "train_xgboost_configuration",
+        "line": 517,
+        "end_line": 531
+      },
+      {
+        "name": "configuration_from_worker_args",
+        "line": 534,
+        "end_line": 564
+      },
+      {
+        "name": "run_training_worker",
+        "line": 567,
+        "end_line": 643
+      },
+      {
+        "name": "validation_artifact_is_complete",
+        "line": 646,
+        "end_line": 700
+      },
+      {
+        "name": "result_is_complete",
+        "line": 703,
+        "end_line": 742
+      },
+      {
+        "name": "build_worker_command",
+        "line": 745,
+        "end_line": 816
+      },
+      {
+        "name": "score_result_is_complete",
+        "line": 819,
+        "end_line": 836
+      },
+      {
+        "name": "score_training_configuration",
+        "line": 839,
+        "end_line": 941
+      },
+      {
+        "name": "rank_joint_configurations",
+        "line": 944,
+        "end_line": 1007
+      },
+      {
+        "name": "format_mean_std",
+        "line": 1010,
+        "end_line": 1011
+      },
+      {
+        "name": "formatted_table",
+        "line": 1014,
+        "end_line": 1052
+      },
+      {
+        "name": "add_arguments",
+        "line": 1055,
+        "end_line": 1141
+      },
+      {
+        "name": "validate_arguments",
+        "line": 1144,
+        "end_line": 1237
+      },
+      {
+        "name": "experiment_settings",
+        "line": 1240,
+        "end_line": 1279
+      },
+      {
+        "name": "main",
+        "line": 1282,
+        "end_line": 1874
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed",
+      "import hashlib",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import tempfile",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt import BalancedBatchSequence, ValF1Callback, build_opt_cnn",
+      "from cnn_opt_1d_4gpu import (  # type: ignore\n        build_opt_cnn_1d,\n        build_vanilla_transformer,\n    )"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/transformer_baseline.py",
+    "lines": 17,
+    "docstring": "Run the vanilla feature-token Transformer with the cnn_opt pipeline.\n\nThe launcher defaults to raw argmax and a 512-unit classifier head. Together\nwith the default encoder settings, this gives 110,661 parameters versus\n109,381 in the default Conv2D model.",
+    "definitions": [],
+    "imports": [
+      "from cnn_opt_1d_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_cnn_opt_thresholds.py",
+    "lines": 789,
+    "docstring": "Tune R2L/U2R score coefficients for an already-trained cnn_opt Conv2D model.\n\nCoefficients are selected only on the reconstructed real-record subset of the\nmodel's validation split. The objective first maximizes the weaker of the R2L\nand U2R recalls, then their mean and rare-class F1. KDDTest+ is predicted only\nafter the pair is fixed.\n\nDecision rule:\n    adjusted_score[R2L] = probability[R2L] / r2l_coefficient\n    adjusted_score[U2R] = probability[U2R] / u2r_coefficient\n\nThe other three class scores are unchanged. Therefore (1.0, 1.0) is ordinary\nargmax, values below 1 promote a rare class, and values above 1 suppress it.\nThese are operating-point parameters, not calibrated probability cutoffs.",
+    "definitions": [
+      {
+        "name": "read_metadata",
+        "line": 76,
+        "end_line": 85
+      },
+      {
+        "name": "read_saved_counts",
+        "line": 88,
+        "end_line": 98
+      },
+      {
+        "name": "verify_counts",
+        "line": 101,
+        "end_line": 111
+      },
+      {
+        "name": "resolve_model_and_metadata",
+        "line": 114,
+        "end_line": 138
+      },
+      {
+        "name": "load_validation_and_test",
+        "line": 141,
+        "end_line": 252
+      },
+      {
+        "name": "threshold_predictions",
+        "line": 255,
+        "end_line": 272
+      },
+      {
+        "name": "calculate_metrics",
+        "line": 275,
+        "end_line": 280
+      },
+      {
+        "name": "threshold_values",
+        "line": 283,
+        "end_line": 288
+      },
+      {
+        "name": "search_thresholds",
+        "line": 291,
+        "end_line": 313
+      },
+      {
+        "name": "format_metric_lines",
+        "line": 316,
+        "end_line": 330
+      },
+      {
+        "name": "main",
+        "line": 333,
+        "end_line": 785
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import ast",
+      "from pathlib import Path",
+      "from typing import Any, Dict, List, Tuple",
+      "import numpy as np",
+      "import pandas as pd",
+      "import tensorflow as tf",
+      "from sklearn.metrics import (\n    classification_report,\n)",
+      "from sklearn.model_selection import train_test_split",
+      "from cnn_gan_foc import (  # type: ignore\n    CLASS_NAMES,\n    _repo_paths,\n    apply_one_hot,\n    apply_scaler,\n    collapse_attack_labels,\n    fit_one_hot_encoders,\n    fit_scaler,\n    load_nsl_kdd_txt,\n    prepare_xy_from_processed,\n    save_confusion_matrices,\n)",
+      "from cnn_opt import (  # type: ignore\n    apply_class_score_scaling,\n    build_optimized_feature_order,\n    score_coefficient_values,\n    score_scaling_metrics,\n    search_score_coefficients,\n    select_synth_for_targets,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv1d_baseline_score_scaling_cv_4gpu.py",
+    "lines": 15,
+    "docstring": "Tune post-hoc score scaling on pure cross-entropy Conv1D OOF predictions.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import (\n    BASELINE_SCALING_COEFFICIENTS,\n    main,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv1d_focal_cv_4gpu.py",
+    "lines": 1546,
+    "docstring": "Tune Conv1D class-balanced focal loss with fixed four-fold OOF validation.\n\nDefault experiment\n------------------\n* Model: the fixed 109,797-parameter Conv1D used by\n  ``cnn_opt_1d_4gpu.py``.\n* Data: KDDTrain+ only. KDDTest+ and synthetic data are never accessed.\n* Grid: beta in {0.99, 0.999, 0.9999} and\n  gamma in {0.25, 0.5, 0.75, 1.0, 1.5, 2.0}.\n* Repetition: training seeds {0, 1, 2} on one frozen four-fold split.\n* Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.\n\nIndependent fold fits are distributed across the requested GPU workers. With\ntwo GPUs, two folds train concurrently and the remaining folds follow from the\nsame work queue. The four predictions are then placed back in original row\norder to form one complete out-of-fold prediction vector. Metrics are\ncalculated once on that vector for each seed, followed by mean and sample\nstandard deviation across the three seeds.\n\nEach fit runs in a fresh subprocess with exactly one visible GPU. Completed\nartifacts are validated and reused when the same command is rerun.\n\nThis is a direct Python launcher for the regular GPU server; it does not\nsubmit a Slurm job.",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 70,
+        "end_line": 72
+      },
+      {
+        "name": "value_token",
+        "line": 75,
+        "end_line": 76
+      },
+      {
+        "name": "progress_bar",
+        "line": 79,
+        "end_line": 87
+      },
+      {
+        "name": "resolve_cuda_tokens",
+        "line": 90,
+        "end_line": 108
+      },
+      {
+        "name": "configurations",
+        "line": 111,
+        "end_line": 135
+      },
+      {
+        "name": "make_fixed_folds",
+        "line": 138,
+        "end_line": 186
+      },
+      {
+        "name": "fold_protocol_rows",
+        "line": 189,
+        "end_line": 204
+      },
+      {
+        "name": "fold_cache_is_complete",
+        "line": 207,
+        "end_line": 266
+      },
+      {
+        "name": "prepare_fold_cache",
+        "line": 269,
+        "end_line": 348
+      },
+      {
+        "name": "worker_configuration",
+        "line": 351,
+        "end_line": 357
+      },
+      {
+        "name": "run_training_worker",
+        "line": 360,
+        "end_line": 535
+      },
+      {
+        "name": "prediction_artifact_is_complete",
+        "line": 538,
+        "end_line": 584
+      },
+      {
+        "name": "result_is_complete",
+        "line": 587,
+        "end_line": 629
+      },
+      {
+        "name": "build_worker_command",
+        "line": 632,
+        "end_line": 677
+      },
+      {
+        "name": "confusion_values",
+        "line": 680,
+        "end_line": 689
+      },
+      {
+        "name": "aggregate_results",
+        "line": 692,
+        "end_line": 851
+      },
+      {
+        "name": "formatted_summary",
+        "line": 854,
+        "end_line": 878
+      },
+      {
+        "name": "add_arguments",
+        "line": 881,
+        "end_line": 987
+      },
+      {
+        "name": "validate_arguments",
+        "line": 990,
+        "end_line": 1011
+      },
+      {
+        "name": "validate_parent_dependencies",
+        "line": 1014,
+        "end_line": 1021
+      },
+      {
+        "name": "main",
+        "line": 1024,
+        "end_line": 1542
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "from sklearn.model_selection import StratifiedKFold",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt_1d_4gpu import build_opt_cnn_1d"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv1d_safe_stack_fusion.py",
+    "lines": 7,
+    "docstring": "Tune Conv1D SAFE-Stack fusion from saved out-of-fold probabilities.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_safe_stack_fusion import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv1d_score_scaling_cv_4gpu.py",
+    "lines": 7,
+    "docstring": "Run the shared balanced-batch OOF score-scaling search for Conv1D.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv2d_baseline_score_scaling_cv_4gpu.py",
+    "lines": 15,
+    "docstring": "Tune post-hoc score scaling on pure cross-entropy Conv2D OOF predictions.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import (\n    BASELINE_SCALING_COEFFICIENTS,\n    main,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv2d_focal_cv_4gpu.py",
+    "lines": 1487,
+    "docstring": "Tune Conv2D class-balanced focal loss with fixed four-fold OOF validation.\n\nDefault experiment\n------------------\n* Model: the fixed 109,381-parameter Conv2D used by ``cnn_opt.py``.\n* Data: KDDTrain+ only. KDDTest+ and synthetic data are never accessed.\n* Grid: beta in {0.99, 0.999, 0.9999} and\n  gamma in {0.25, 0.5, 0.75, 1.0, 1.5, 2.0}.\n* Repetition: training seeds {0, 1, 2} on one frozen four-fold split.\n* Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.\n\nThe four folds are assigned to four GPUs. For every beta/gamma/seed setting,\nGPU i trains on three folds and predicts fold i. The four predictions are then\nplaced back in original row order to form one complete out-of-fold prediction\nvector. Metrics are calculated once on that vector for each seed, followed by\nmean and sample standard deviation across the three seeds.\n\nEach fit runs in a fresh subprocess with exactly one visible GPU. Completed\nartifacts are validated and reused when the same command is rerun.",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 64,
+        "end_line": 66
+      },
+      {
+        "name": "value_token",
+        "line": 69,
+        "end_line": 70
+      },
+      {
+        "name": "progress_bar",
+        "line": 73,
+        "end_line": 81
+      },
+      {
+        "name": "configurations",
+        "line": 84,
+        "end_line": 108
+      },
+      {
+        "name": "make_fixed_folds",
+        "line": 111,
+        "end_line": 159
+      },
+      {
+        "name": "fold_protocol_rows",
+        "line": 162,
+        "end_line": 177
+      },
+      {
+        "name": "fold_cache_is_complete",
+        "line": 180,
+        "end_line": 239
+      },
+      {
+        "name": "prepare_fold_cache",
+        "line": 242,
+        "end_line": 321
+      },
+      {
+        "name": "worker_configuration",
+        "line": 324,
+        "end_line": 330
+      },
+      {
+        "name": "run_training_worker",
+        "line": 333,
+        "end_line": 505
+      },
+      {
+        "name": "prediction_artifact_is_complete",
+        "line": 508,
+        "end_line": 554
+      },
+      {
+        "name": "result_is_complete",
+        "line": 557,
+        "end_line": 597
+      },
+      {
+        "name": "build_worker_command",
+        "line": 600,
+        "end_line": 645
+      },
+      {
+        "name": "confusion_values",
+        "line": 648,
+        "end_line": 657
+      },
+      {
+        "name": "aggregate_results",
+        "line": 660,
+        "end_line": 819
+      },
+      {
+        "name": "formatted_summary",
+        "line": 822,
+        "end_line": 846
+      },
+      {
+        "name": "add_arguments",
+        "line": 849,
+        "end_line": 952
+      },
+      {
+        "name": "validate_arguments",
+        "line": 955,
+        "end_line": 976
+      },
+      {
+        "name": "validate_parent_dependencies",
+        "line": 979,
+        "end_line": 986
+      },
+      {
+        "name": "main",
+        "line": 989,
+        "end_line": 1483
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "from sklearn.model_selection import StratifiedKFold",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt import build_opt_cnn"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv2d_safe_stack_fusion.py",
+    "lines": 1246,
+    "docstring": "Tune architecture-specific SAFE-Stack fusion from saved OOF probabilities.\n\nThis script performs no neural-network training and never opens KDDTest+.\nIt combines the matching four-fold OOF predictions produced by:\n\n* General expert: cross-entropy with ordinary shuffled batches.\n* Focal expert: class-balanced focal loss with ordinary shuffled batches.\n* Batching expert: cross-entropy with minority-guaranteed batches.\n\nFor each training seed, the three inputs must describe the same KDDTrain+\nrows and the same held-out fold assignment.  The base expert is selected once\nfrom the three expert summaries by mean OOF Macro-F1, then mean MCC, then mean\nRare F1.  The fixed-base fusion grid contains 5,625 settings:\n\n    15 R2L weight triplets x 15 U2R weight triplets\n    x 5 R2L margins x 5 U2R margins.\n\nEvery setting is evaluated separately on each seed's complete pooled OOF\nvector.  The ranking is based on mean Rare F1 across seeds, followed by mean\nMacro-F1 and mean MCC.  All per-seed and all-configuration results are saved,\nso a different predeclared selection rule can be applied without rerunning\nmodels or the fusion search.",
+    "definitions": [
+      {
+        "name": "OOFArtifact",
+        "line": 80,
+        "end_line": 89
+      },
+      {
+        "name": "CandidateGrid",
+        "line": 93,
+        "end_line": 102
+      },
+      {
+        "name": "stable_hash",
+        "line": 105,
+        "end_line": 107
+      },
+      {
+        "name": "resolve_cli_path",
+        "line": 110,
+        "end_line": 114
+      },
+      {
+        "name": "resolve_recorded_path",
+        "line": 117,
+        "end_line": 149
+      },
+      {
+        "name": "read_json",
+        "line": 152,
+        "end_line": 158
+      },
+      {
+        "name": "discover_standard_oof_paths",
+        "line": 161,
+        "end_line": 208
+      },
+      {
+        "name": "discover_focal_oof_paths",
+        "line": 211,
+        "end_line": 270
+      },
+      {
+        "name": "load_oof_artifact",
+        "line": 273,
+        "end_line": 330
+      },
+      {
+        "name": "validate_alignment",
+        "line": 333,
+        "end_line": 348
+      },
+      {
+        "name": "generate_simplex_weights",
+        "line": 351,
+        "end_line": 374
+      },
+      {
+        "name": "make_candidate_grid",
+        "line": 377,
+        "end_line": 411
+      },
+      {
+        "name": "metrics_from_confusions",
+        "line": 414,
+        "end_line": 470
+      },
+      {
+        "name": "stable_top_two_support",
+        "line": 473,
+        "end_line": 478
+      },
+      {
+        "name": "score_fusion_confusions",
+        "line": 481,
+        "end_line": 581
+      },
+      {
+        "name": "predict_one_fusion",
+        "line": 584,
+        "end_line": 633
+      },
+      {
+        "name": "expert_seed_metrics",
+        "line": 636,
+        "end_line": 680
+      },
+      {
+        "name": "candidate_columns",
+        "line": 683,
+        "end_line": 698
+      },
+      {
+        "name": "aggregate_candidate_scores",
+        "line": 701,
+        "end_line": 756
+      },
+      {
+        "name": "format_summary",
+        "line": 759,
+        "end_line": 790
+      },
+      {
+        "name": "simple_average_metrics",
+        "line": 793,
+        "end_line": 812
+      },
+      {
+        "name": "build_reference_ablation",
+        "line": 815,
+        "end_line": 860
+      },
+      {
+        "name": "parse_args",
+        "line": 863,
+        "end_line": 939
+      },
+      {
+        "name": "main",
+        "line": 942,
+        "end_line": 1242
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from dataclasses import dataclass",
+      "import hashlib",
+      "import json",
+      "from pathlib import Path",
+      "import time",
+      "from typing import Any, Dict, List, Mapping, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_conv2d_score_scaling_cv_4gpu.py",
+    "lines": 2022,
+    "docstring": "Evaluate raw or score-scaled neural models from leakage-free OOF predictions.\n\nThe shared runner supports pure cross-entropy baselines, batch-only ablations,\nand the focal-loss plus minority-batch pipeline.  For score-scaling searches it\ntrains one model for each of four fixed folds and three seeds, restores each\nseed's folds to original row order, and searches R2L/U2R coefficient pairs from\nthe saved probabilities without retraining.\n\nKDDTest+ and synthetic data are never accessed. The held-out fold is not\npassed to model.fit: training uses a fixed epoch budget with no validation\ncheckpoint or early stopping.",
+    "definitions": [
+      {
+        "name": "configure_architecture",
+        "line": 132,
+        "end_line": 137
+      },
+      {
+        "name": "architecture_label",
+        "line": 140,
+        "end_line": 141
+      },
+      {
+        "name": "architecture_model_key",
+        "line": 144,
+        "end_line": 145
+      },
+      {
+        "name": "stable_hash",
+        "line": 148,
+        "end_line": 150
+      },
+      {
+        "name": "progress_bar",
+        "line": 153,
+        "end_line": 159
+      },
+      {
+        "name": "resolve_cuda_tokens",
+        "line": 162,
+        "end_line": 176
+      },
+      {
+        "name": "worker_result_is_complete",
+        "line": 179,
+        "end_line": 235
+      },
+      {
+        "name": "run_training_worker",
+        "line": 238,
+        "end_line": 501
+      },
+      {
+        "name": "build_worker_command",
+        "line": 504,
+        "end_line": 558
+      },
+      {
+        "name": "metrics_from_confusions",
+        "line": 561,
+        "end_line": 621
+      },
+      {
+        "name": "score_pair_confusions",
+        "line": 624,
+        "end_line": 686
+      },
+      {
+        "name": "assemble_oof_predictions",
+        "line": 689,
+        "end_line": 784
+      },
+      {
+        "name": "score_oof_probabilities",
+        "line": 787,
+        "end_line": 990
+      },
+      {
+        "name": "formatted_summary",
+        "line": 993,
+        "end_line": 1031
+      },
+      {
+        "name": "add_arguments",
+        "line": 1034,
+        "end_line": 1101
+      },
+      {
+        "name": "validate_arguments",
+        "line": 1104,
+        "end_line": 1149
+      },
+      {
+        "name": "main",
+        "line": 1152,
+        "end_line": 2018
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import inspect",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_conv1d_focal_cv_4gpu as conv1d_stage1",
+      "import tune_conv2d_focal_cv_4gpu as conv2d_stage1",
+      "import tune_mlp_focal_cv_4gpu as mlp_stage1",
+      "import tune_transformer_focal_cv_4gpu as transformer_stage1",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt import BalancedBatchSequence",
+      "from cnn_opt_1d_4gpu import build_opt_cnn_1d as build_model",
+      "from cnn_opt import build_opt_cnn as build_model",
+      "from cnn_opt_1d_4gpu import build_opt_mlp as build_model",
+      "from cnn_opt_1d_4gpu import (  # type: ignore\n            build_vanilla_transformer as build_model,\n        )"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_mlp_baseline_score_scaling_cv_4gpu.py",
+    "lines": 15,
+    "docstring": "Tune post-hoc score scaling on pure cross-entropy MLP OOF predictions.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import (\n    BASELINE_SCALING_COEFFICIENTS,\n    main,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_mlp_focal_cv_4gpu.py",
+    "lines": 1525,
+    "docstring": "Tune MLP class-balanced focal loss with fixed four-fold OOF validation.\n\nDefault experiment\n------------------\n* Model: the fixed 99,845-parameter MLP used by ``cnn_opt_1d_4gpu.py``.\n* Data: KDDTrain+ only. KDDTest+ and synthetic data are never accessed.\n* Grid: beta in {0.99, 0.999, 0.9999} and\n  gamma in {0.25, 0.5, 0.75, 1.0, 1.5, 2.0}.\n* Repetition: training seeds {0, 1, 2} on one frozen four-fold split.\n* Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.\n\nIndependent fold fits are distributed across the requested GPU workers. With\ntwo GPUs, two folds train concurrently and the remaining folds follow from the\nsame work queue. The four predictions are then placed back in original row\norder to form one complete out-of-fold prediction vector. Metrics are\ncalculated once on that vector for each seed, followed by mean and sample\nstandard deviation across the three seeds.\n\nEach fit runs in a fresh subprocess with exactly one visible GPU. Completed\nartifacts are validated and reused when the same command is rerun.",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 63,
+        "end_line": 65
+      },
+      {
+        "name": "value_token",
+        "line": 68,
+        "end_line": 69
+      },
+      {
+        "name": "progress_bar",
+        "line": 72,
+        "end_line": 80
+      },
+      {
+        "name": "resolve_cuda_tokens",
+        "line": 83,
+        "end_line": 101
+      },
+      {
+        "name": "configurations",
+        "line": 104,
+        "end_line": 128
+      },
+      {
+        "name": "make_fixed_folds",
+        "line": 131,
+        "end_line": 179
+      },
+      {
+        "name": "fold_protocol_rows",
+        "line": 182,
+        "end_line": 197
+      },
+      {
+        "name": "fold_cache_is_complete",
+        "line": 200,
+        "end_line": 259
+      },
+      {
+        "name": "prepare_fold_cache",
+        "line": 262,
+        "end_line": 341
+      },
+      {
+        "name": "worker_configuration",
+        "line": 344,
+        "end_line": 350
+      },
+      {
+        "name": "run_training_worker",
+        "line": 353,
+        "end_line": 522
+      },
+      {
+        "name": "prediction_artifact_is_complete",
+        "line": 525,
+        "end_line": 571
+      },
+      {
+        "name": "result_is_complete",
+        "line": 574,
+        "end_line": 614
+      },
+      {
+        "name": "build_worker_command",
+        "line": 617,
+        "end_line": 662
+      },
+      {
+        "name": "confusion_values",
+        "line": 665,
+        "end_line": 674
+      },
+      {
+        "name": "aggregate_results",
+        "line": 677,
+        "end_line": 836
+      },
+      {
+        "name": "formatted_summary",
+        "line": 839,
+        "end_line": 863
+      },
+      {
+        "name": "add_arguments",
+        "line": 866,
+        "end_line": 972
+      },
+      {
+        "name": "validate_arguments",
+        "line": 975,
+        "end_line": 996
+      },
+      {
+        "name": "validate_parent_dependencies",
+        "line": 999,
+        "end_line": 1006
+      },
+      {
+        "name": "main",
+        "line": 1009,
+        "end_line": 1521
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "from sklearn.model_selection import StratifiedKFold",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt_1d_4gpu import build_opt_mlp"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_mlp_safe_stack_fusion.py",
+    "lines": 7,
+    "docstring": "Tune MLP SAFE-Stack fusion from saved OOF probabilities.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_safe_stack_fusion import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_mlp_score_scaling_cv_4gpu.py",
+    "lines": 7,
+    "docstring": "Run the shared balanced-batch OOF score-scaling search for MLP.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_robust_calibrated_super_stack_all.py",
+    "lines": 2700,
+    "docstring": "Run the Robust Calibrated Super-Stack search on saved KDDTrain+ OOF data.\n\nThis is a CPU-only meta-learning experiment.  It never opens KDDTest+, never\nfits a backbone model, and never uses final-test labels.  General, Focal, and\nMinority-Batching OOF probability artifacts are treated as frozen inputs.\n\nFor every requested architecture the runner performs:\n\n* four-fold nested *meta-level* validation (three-fold tuning inside each\n  held-out outer fold), with a shared configuration selected across seeds;\n* raw versus per-expert temperature calibration fitted inside each meta-\n  training split;\n* F0/F1/F2 confidence and disagreement feature families;\n* L2 multinomial logistic stacking over five class-weight exponents and seven\n  regularization strengths;\n* shrinkage to the original raw three-expert probability average;\n* independent R2L/U2R log-score offsets;\n* natural and rare-subtype-balanced validation views;\n* a separate four-fold all-OOF selection followed by one deployable refit per\n  seed.\n\nThe base-model OOF predictions were created before this script and are not\nnested again inside the meta outer folds.  The resulting estimate is therefore\n\"nested meta-level CV conditional on frozen cross-fitted expert predictions\",\nnot fully nested end-to-end validation.  A fully nested claim would require\nretraining the neural experts inside every meta outer split.\n\nExample:\n\n    python -u src/tune_robust_calibrated_super_stack_all.py --dry-run\n    python -u src/tune_robust_calibrated_super_stack_all.py --workers 32\n\nAll numerical-library threads are limited inside workers.  Independent\ncalibration/feature tasks are distributed over CPU processes.",
+    "definitions": [
+      {
+        "name": "SearchSettings",
+        "line": 120,
+        "end_line": 130
+      },
+      {
+        "name": "MetaTask",
+        "line": 134,
+        "end_line": 142
+      },
+      {
+        "name": "ArchitectureInput",
+        "line": 146,
+        "end_line": 159
+      },
+      {
+        "name": "stable_hash",
+        "line": 162,
+        "end_line": 164
+      },
+      {
+        "name": "package_version",
+        "line": 167,
+        "end_line": 171
+      },
+      {
+        "name": "atomic_csv_gzip",
+        "line": 174,
+        "end_line": 179
+      },
+      {
+        "name": "atomic_npz",
+        "line": 182,
+        "end_line": 183
+      },
+      {
+        "name": "available_logical_cpus",
+        "line": 186,
+        "end_line": 189
+      },
+      {
+        "name": "detect_physical_cpus",
+        "line": 192,
+        "end_line": 212
+      },
+      {
+        "name": "resolve_template",
+        "line": 215,
+        "end_line": 216
+      },
+      {
+        "name": "read_protocol_from_pointer",
+        "line": 219,
+        "end_line": 224
+      },
+      {
+        "name": "validate_protocol_lineage",
+        "line": 227,
+        "end_line": 306
+      },
+      {
+        "name": "collapse_subtypes",
+        "line": 309,
+        "end_line": 319
+      },
+      {
+        "name": "load_train_subtypes",
+        "line": 322,
+        "end_line": 337
+      },
+      {
+        "name": "subtype_balanced_weights",
+        "line": 340,
+        "end_line": 370
+      },
+      {
+        "name": "load_architecture_input",
+        "line": 373,
+        "end_line": 470
+      },
+      {
+        "name": "validate_cross_architecture_alignment",
+        "line": 473,
+        "end_line": 483
+      },
+      {
+        "name": "temperature_scale",
+        "line": 486,
+        "end_line": 495
+      },
+      {
+        "name": "fit_temperature",
+        "line": 498,
+        "end_line": 531
+      },
+      {
+        "name": "feature_names",
+        "line": 534,
+        "end_line": 556
+      },
+      {
+        "name": "build_features",
+        "line": 559,
+        "end_line": 612
+      },
+      {
+        "name": "fit_standardizer",
+        "line": 615,
+        "end_line": 619
+      },
+      {
+        "name": "apply_standardizer",
+        "line": 622,
+        "end_line": 626
+      },
+      {
+        "name": "normalized_sample_weights",
+        "line": 629,
+        "end_line": 637
+      },
+      {
+        "name": "metrics_from_confusions",
+        "line": 640,
+        "end_line": 693
+      },
+      {
+        "name": "confusion_batch",
+        "line": 696,
+        "end_line": 725
+      },
+      {
+        "name": "apply_offsets",
+        "line": 728,
+        "end_line": 739
+      },
+      {
+        "name": "offset_decision_probabilities",
+        "line": 742,
+        "end_line": 755
+      },
+      {
+        "name": "score_probability_family",
+        "line": 758,
+        "end_line": 791
+      },
+      {
+        "name": "_worker_initializer",
+        "line": 794,
+        "end_line": 798
+      },
+      {
+        "name": "_task_cache_valid",
+        "line": 801,
+        "end_line": 877
+      },
+      {
+        "name": "_run_meta_task",
+        "line": 880,
+        "end_line": 1028
+      },
+      {
+        "name": "task_stage",
+        "line": 1031,
+        "end_line": 1032
+      },
+      {
+        "name": "make_tasks",
+        "line": 1035,
+        "end_line": 1073
+      },
+      {
+        "name": "load_task_arrays",
+        "line": 1076,
+        "end_line": 1080
+      },
+      {
+        "name": "metric_values_for_predictions",
+        "line": 1083,
+        "end_line": 1097
+      },
+      {
+        "name": "fixed_and_average_offset_seed_metrics",
+        "line": 1100,
+        "end_line": 1235
+      },
+      {
+        "name": "stack_descriptor_frame",
+        "line": 1238,
+        "end_line": 1269
+      },
+      {
+        "name": "aggregate_seed_metrics",
+        "line": 1272,
+        "end_line": 1310
+      },
+      {
+        "name": "build_stage_ranking",
+        "line": 1313,
+        "end_line": 1460
+      },
+      {
+        "name": "candidate_config",
+        "line": 1463,
+        "end_line": 1493
+      },
+      {
+        "name": "fit_selected_candidate",
+        "line": 1496,
+        "end_line": 1635
+      },
+      {
+        "name": "run_search_tasks",
+        "line": 1638,
+        "end_line": 1751
+      },
+      {
+        "name": "summarize_method_runs",
+        "line": 1754,
+        "end_line": 1773
+      },
+      {
+        "name": "evaluate_architecture",
+        "line": 1776,
+        "end_line": 2187
+      },
+      {
+        "name": "experiment_definition",
+        "line": 2190,
+        "end_line": 2240
+      },
+      {
+        "name": "build_protocol",
+        "line": 2243,
+        "end_line": 2356
+      },
+      {
+        "name": "print_preflight",
+        "line": 2359,
+        "end_line": 2391
+      },
+      {
+        "name": "run_benchmark",
+        "line": 2394,
+        "end_line": 2444
+      },
+      {
+        "name": "parse_args",
+        "line": 2447,
+        "end_line": 2528
+      },
+      {
+        "name": "main",
+        "line": 2531,
+        "end_line": 2696
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait",
+      "from dataclasses import asdict, dataclass",
+      "import gzip",
+      "import hashlib",
+      "import importlib.metadata",
+      "import json",
+      "import math",
+      "import multiprocessing as mp",
+      "import os",
+      "from pathlib import Path",
+      "import sys",
+      "import tempfile",
+      "import time",
+      "from typing import Any, Dict, List, Mapping, Sequence",
+      "import warnings",
+      "import zipfile",
+      "import numpy as np",
+      "import pandas as pd",
+      "from scipy.optimize import minimize_scalar",
+      "from scipy.special import logsumexp",
+      "from sklearn.exceptions import ConvergenceWarning",
+      "from sklearn.linear_model import LogisticRegression",
+      "from threadpoolctl import threadpool_limits",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_conv2d_safe_stack_fusion as safe"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_transformer_baseline_score_scaling_cv_4gpu.py",
+    "lines": 15,
+    "docstring": "Tune post-hoc score scaling on pure Transformer OOF predictions.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import (\n    BASELINE_SCALING_COEFFICIENTS,\n    main,\n)"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_transformer_focal_cv_4gpu.py",
+    "lines": 1546,
+    "docstring": "Tune Transformer class-balanced focal loss with fixed four-fold OOF validation.\n\nDefault experiment\n------------------\n* Model: the fixed 110,661-parameter Transformer used by\n  ``cnn_opt_1d_4gpu.py``.\n* Data: KDDTrain+ only. KDDTest+ and synthetic data are never accessed.\n* Grid: beta in {0.99, 0.999, 0.9999} and\n  gamma in {0.25, 0.5, 0.75, 1.0, 1.5, 2.0}.\n* Repetition: training seeds {0, 1, 2} on one frozen four-fold split.\n* Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.\n\nIndependent fold fits are distributed across the requested GPU workers. With\ntwo GPUs, two folds train concurrently and the remaining folds follow from the\nsame work queue. The four predictions are then placed back in original row\norder to form one complete out-of-fold prediction vector. Metrics are\ncalculated once on that vector for each seed, followed by mean and sample\nstandard deviation across the three seeds.\n\nEach fit runs in a fresh subprocess with exactly one visible GPU. Completed\nartifacts are validated and reused when the same command is rerun.\n\nThis is a direct Python launcher for the regular GPU server; it does not\nsubmit a Slurm job.",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 70,
+        "end_line": 72
+      },
+      {
+        "name": "value_token",
+        "line": 75,
+        "end_line": 76
+      },
+      {
+        "name": "progress_bar",
+        "line": 79,
+        "end_line": 87
+      },
+      {
+        "name": "resolve_cuda_tokens",
+        "line": 90,
+        "end_line": 108
+      },
+      {
+        "name": "configurations",
+        "line": 111,
+        "end_line": 135
+      },
+      {
+        "name": "make_fixed_folds",
+        "line": 138,
+        "end_line": 186
+      },
+      {
+        "name": "fold_protocol_rows",
+        "line": 189,
+        "end_line": 204
+      },
+      {
+        "name": "fold_cache_is_complete",
+        "line": 207,
+        "end_line": 266
+      },
+      {
+        "name": "prepare_fold_cache",
+        "line": 269,
+        "end_line": 348
+      },
+      {
+        "name": "worker_configuration",
+        "line": 351,
+        "end_line": 357
+      },
+      {
+        "name": "run_training_worker",
+        "line": 360,
+        "end_line": 535
+      },
+      {
+        "name": "prediction_artifact_is_complete",
+        "line": 538,
+        "end_line": 584
+      },
+      {
+        "name": "result_is_complete",
+        "line": 587,
+        "end_line": 629
+      },
+      {
+        "name": "build_worker_command",
+        "line": 632,
+        "end_line": 677
+      },
+      {
+        "name": "confusion_values",
+        "line": 680,
+        "end_line": 689
+      },
+      {
+        "name": "aggregate_results",
+        "line": 692,
+        "end_line": 851
+      },
+      {
+        "name": "formatted_summary",
+        "line": 854,
+        "end_line": 878
+      },
+      {
+        "name": "add_arguments",
+        "line": 881,
+        "end_line": 987
+      },
+      {
+        "name": "validate_arguments",
+        "line": 990,
+        "end_line": 1011
+      },
+      {
+        "name": "validate_parent_dependencies",
+        "line": 1014,
+        "end_line": 1021
+      },
+      {
+        "name": "main",
+        "line": 1024,
+        "end_line": 1542
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "import hashlib",
+      "import json",
+      "import os",
+      "from pathlib import Path",
+      "import queue",
+      "import shlex",
+      "import subprocess",
+      "import sys",
+      "import threading",
+      "import time",
+      "from typing import Any, Dict, List, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "from sklearn.model_selection import StratifiedKFold",
+      "import tensorflow as tf",
+      "from cnn_gan_foc import ClassBalancedFocalLoss",
+      "from cnn_opt_1d_4gpu import build_vanilla_transformer"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_transformer_safe_stack_fusion.py",
+    "lines": 7,
+    "docstring": "Tune Transformer SAFE-Stack fusion from saved OOF probabilities.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_safe_stack_fusion import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_transformer_score_scaling_cv_4gpu.py",
+    "lines": 7,
+    "docstring": "Run the shared balanced-batch OOF score-scaling search for Transformer.",
+    "definitions": [],
+    "imports": [
+      "from tune_conv2d_score_scaling_cv_4gpu import main"
+    ],
+    "tests": []
+  },
+  {
+    "path": "src/tune_variant_specific_score_scaling.py",
+    "lines": 1174,
+    "docstring": "Select variant-specific score scaling from saved OOF predictions.\n\nThis is a post-processing utility: it never trains a neural network.  The\n``select`` phase reads KDDTrain+ out-of-fold probabilities and independently\nselects R2L/U2R score coefficients for each architecture and each of four\ntraining regimes:\n\n* ordinary cross-entropy;\n* class-balanced focal loss;\n* cross-entropy with minority-guaranteed batches;\n* class-balanced focal loss with minority-guaranteed batches.\n\nThe ``evaluate`` phase reads the frozen selection manifest and applies each\npair to the corresponding saved KDDTest+ probabilities.  Keeping these phases\nseparate makes it explicit that KDDTest+ is not part of coefficient selection.\n\nRun both commands from the repository root::\n\n    python src/tune_variant_specific_score_scaling.py select\n    python src/tune_variant_specific_score_scaling.py evaluate\n\nThe resulting validation and KDDTest+ CSV files contain the complete 2 x 2 x 2\nfactorial comparison of focal loss, minority batching, and score scaling.",
+    "definitions": [
+      {
+        "name": "stable_hash",
+        "line": 133,
+        "end_line": 135
+      },
+      {
+        "name": "resolve_recorded_path",
+        "line": 138,
+        "end_line": 155
+      },
+      {
+        "name": "find_latest_pointer",
+        "line": 158,
+        "end_line": 174
+      },
+      {
+        "name": "validate_simple_training_protocol",
+        "line": 177,
+        "end_line": 269
+      },
+      {
+        "name": "load_oof_paths",
+        "line": 272,
+        "end_line": 371
+      },
+      {
+        "name": "read_probability_artifact",
+        "line": 374,
+        "end_line": 423
+      },
+      {
+        "name": "add_metric_row",
+        "line": 426,
+        "end_line": 459
+      },
+      {
+        "name": "summarize_seed_metrics",
+        "line": 462,
+        "end_line": 501
+      },
+      {
+        "name": "rare_f1_table",
+        "line": 504,
+        "end_line": 529
+      },
+      {
+        "name": "validate_common_labels",
+        "line": 532,
+        "end_line": 541
+      },
+      {
+        "name": "select_coefficients",
+        "line": 544,
+        "end_line": 776
+      },
+      {
+        "name": "load_selection_manifest",
+        "line": 779,
+        "end_line": 807
+      },
+      {
+        "name": "candidate_test_paths",
+        "line": 810,
+        "end_line": 822
+      },
+      {
+        "name": "find_test_prediction_path",
+        "line": 825,
+        "end_line": 851
+      },
+      {
+        "name": "load_test_run_metadata",
+        "line": 854,
+        "end_line": 918
+      },
+      {
+        "name": "verify_oof_lineage",
+        "line": 921,
+        "end_line": 932
+      },
+      {
+        "name": "evaluate_kddtest",
+        "line": 935,
+        "end_line": 1089
+      },
+      {
+        "name": "coefficient_values",
+        "line": 1092,
+        "end_line": 1093
+      },
+      {
+        "name": "build_parser",
+        "line": 1096,
+        "end_line": 1153
+      },
+      {
+        "name": "main",
+        "line": 1156,
+        "end_line": 1170
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import argparse",
+      "import hashlib",
+      "import json",
+      "from pathlib import Path",
+      "from typing import Any, Dict, Iterable, Mapping, Sequence",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_conv2d_score_scaling_cv_4gpu as scaling"
+    ],
+    "tests": []
+  },
+  {
+    "path": "tests/test_final_natural_rare_super_stack_kddtest.py",
+    "lines": 204,
+    "docstring": null,
+    "definitions": [
+      {
+        "name": "FrozenNaturalRareKDDTestUnitTests",
+        "line": 18,
+        "end_line": 200
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import sys",
+      "from pathlib import Path",
+      "import unittest",
+      "import numpy as np",
+      "import pandas as pd",
+      "import evaluate_final_natural_rare_super_stack_kddtest as final_stack",
+      "import tune_robust_calibrated_super_stack_all as stack"
+    ],
+    "tests": [
+      "test_frozen_candidate_identities",
+      "test_natural_ranking_filters_guards_and_uses_declared_order",
+      "test_saved_state_inference_matches_training_implementation"
+    ]
+  },
+  {
+    "path": "tests/test_robust_calibrated_super_stack.py",
+    "lines": 405,
+    "docstring": null,
+    "definitions": [
+      {
+        "name": "RobustSuperStackUnitTests",
+        "line": 19,
+        "end_line": 401
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import sys",
+      "import tempfile",
+      "from pathlib import Path",
+      "import unittest",
+      "from unittest import mock",
+      "import numpy as np",
+      "import pandas as pd",
+      "import tune_robust_calibrated_super_stack_all as stack"
+    ],
+    "tests": [
+      "test_feature_shapes_names_and_finiteness",
+      "test_temperature_scaling_is_normalized_and_preserves_argmax",
+      "test_offset_probabilities_reproduce_predictions",
+      "test_fitted_temperature_does_not_increase_training_nll",
+      "test_normalized_class_weights_have_mean_one",
+      "test_selected_stack_refit_produces_complete_model_state",
+      "test_process_worker_task_and_resume_cache",
+      "test_subtype_balancing_equalizes_rare_subtype_mass",
+      "test_confusion_batch_matches_scalar_confusions",
+      "test_canonical_candidate_counts",
+      "test_one_synthetic_meta_task_end_to_end",
+      "test_synthetic_final_artifact_path_for_fixed_winner"
+    ]
+  },
+  {
+    "path": "tests/test_select_fusion_against_all_validation_baselines.py",
+    "lines": 293,
+    "docstring": null,
+    "definitions": [
+      {
+        "name": "standalone",
+        "line": 19,
+        "end_line": 25
+      },
+      {
+        "name": "ValidationOnlyFusionSelectorTests",
+        "line": 28,
+        "end_line": 289
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import sys",
+      "from pathlib import Path",
+      "import unittest",
+      "from unittest import mock",
+      "import numpy as np",
+      "import pandas as pd",
+      "import select_fusion_against_all_validation_baselines as selector",
+      "import tune_robust_calibrated_super_stack_all as stack"
+    ],
+    "tests": [
+      "test_standalone_average_preserves_requested_row_axis",
+      "test_ignores_legacy_macro_and_mcc_guards",
+      "test_filters_only_technically_invalid_candidates",
+      "test_minimum_gain_boundary_is_absolute_and_inclusive",
+      "test_only_real_fusion_families_and_average_are_considered",
+      "test_nested_acceptance_requires_all_three_conditions",
+      "test_outer_refits_use_exact_complements_and_cover_every_row"
+    ]
+  },
+  {
+    "path": "tests/test_validation_filtered_fusion_kddtest_audit.py",
+    "lines": 358,
+    "docstring": null,
+    "definitions": [
+      {
+        "name": "ValidationFilteredFusionAuditTests",
+        "line": 20,
+        "end_line": 354
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import sys",
+      "from pathlib import Path",
+      "import tempfile",
+      "import unittest",
+      "import numpy as np",
+      "import pandas as pd",
+      "import audit_validation_filtered_fusion_kddtest as audit",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_robust_calibrated_super_stack_all as stack"
+    ],
+    "tests": [
+      "test_validation_filter_is_inclusive_and_ignores_legacy_guards",
+      "test_validation_survivors_preserve_ranking_architecture_column",
+      "test_frozen_scaling_is_applied_to_general_probabilities",
+      "test_vectorized_candidate_scoring_matches_direct_predictions",
+      "test_test_guard_reports_and_ranks_every_passing_candidate",
+      "test_stack_tasks_share_all_q_c_candidates_by_calibration_features",
+      "test_progress_message_reports_architecture_and_overall_percentages",
+      "test_direct_stack_worker_refits_once_per_q_c_and_scores_all_rules",
+      "test_task_cache_round_trip_and_fingerprint_rejection"
+    ]
+  },
+  {
+    "path": "tests/test_variant_specific_score_scaling.py",
+    "lines": 384,
+    "docstring": null,
+    "definitions": [
+      {
+        "name": "VariantSpecificScoreScalingTests",
+        "line": 21,
+        "end_line": 380
+      }
+    ],
+    "imports": [
+      "from __future__ import annotations",
+      "import json",
+      "import argparse",
+      "from pathlib import Path",
+      "import sys",
+      "import tempfile",
+      "import unittest",
+      "import numpy as np",
+      "import pandas as pd",
+      "import run_no_ctgan_model_ablation_4gpu as core",
+      "import tune_variant_specific_score_scaling as subject"
+    ],
+    "tests": [
+      "test_focal_stage1_resolves_only_selected_configuration",
+      "test_legacy_focal_batch_protocol_is_identified_from_recorded_fields",
+      "test_probability_artifact_validation_and_score_application",
+      "test_distinct_duplicate_test_artifacts_are_rejected",
+      "test_summary_keeps_all_eight_factorial_configurations",
+      "test_two_stage_end_to_end_from_saved_probabilities"
+    ]
+  }
+]

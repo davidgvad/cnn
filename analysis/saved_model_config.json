@@ -1,0 +1,530 @@
+{
+  "{\"class_name\"": {
+    "class_name": "Functional",
+    "config": {
+      "name": "functional_26",
+      "trainable": true,
+      "layers": [
+        {
+          "class_name": "InputLayer",
+          "config": {
+            "batch_shape": [
+              null,
+              11,
+              11,
+              1
+            ],
+            "dtype": "float32",
+            "sparse": false,
+            "name": "input_layer_26"
+          },
+          "name": "input_layer_26",
+          "inbound_nodes": []
+        },
+        {
+          "class_name": "Conv2D",
+          "config": {
+            "name": "conv2d_52",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "filters": 64,
+            "kernel_size": [
+              3,
+              3
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "padding": "valid",
+            "data_format": "channels_last",
+            "dilation_rate": [
+              1,
+              1
+            ],
+            "groups": 1,
+            "activation": "relu",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "kernel_regularizer": null,
+            "bias_regularizer": null,
+            "activity_regularizer": null,
+            "kernel_constraint": null,
+            "bias_constraint": null
+          },
+          "name": "conv2d_52",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      11,
+                      11,
+                      1
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "input_layer_26",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "class_name": "MaxPooling2D",
+          "config": {
+            "name": "max_pooling2d_52",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "pool_size": [
+              2,
+              2
+            ],
+            "padding": "valid",
+            "strides": [
+              2,
+              2
+            ],
+            "data_format": "channels_last"
+          },
+          "name": "max_pooling2d_52",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      9,
+                      9,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "conv2d_52",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "class_name": "Dropout",
+          "config": {
+            "name": "dropout_26",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "rate": 0.25,
+            "seed": null,
+            "noise_shape": null
+          },
+          "name": "dropout_26",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4,
+                      4,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "max_pooling2d_52",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {
+                "training": false
+              }
+            }
+          ]
+        },
+        {
+          "class_name": "Conv2D",
+          "config": {
+            "name": "conv2d_53",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "filters": 64,
+            "kernel_size": [
+              3,
+              3
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "padding": "valid",
+            "data_format": "channels_last",
+            "dilation_rate": [
+              1,
+              1
+            ],
+            "groups": 1,
+            "activation": "leaky_relu",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "kernel_regularizer": null,
+            "bias_regularizer": null,
+            "activity_regularizer": null,
+            "kernel_constraint": null,
+            "bias_constraint": null
+          },
+          "name": "conv2d_53",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      4,
+                      4,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "dropout_26",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "class_name": "MaxPooling2D",
+          "config": {
+            "name": "max_pooling2d_53",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "pool_size": [
+              2,
+              2
+            ],
+            "padding": "valid",
+            "strides": [
+              2,
+              2
+            ],
+            "data_format": "channels_last"
+          },
+          "name": "max_pooling2d_53",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      2,
+                      2,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "conv2d_53",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "class_name": "Flatten",
+          "config": {
+            "name": "flatten_26",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "data_format": "channels_last"
+          },
+          "name": "flatten_26",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      1,
+                      1,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "max_pooling2d_53",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "class_name": "Dense",
+          "config": {
+            "name": "dense_52",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "units": 256,
+            "activation": "relu",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "kernel_regularizer": null,
+            "bias_regularizer": null,
+            "kernel_constraint": null,
+            "bias_constraint": null
+          },
+          "name": "dense_52",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      64
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "flatten_26",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        },
+        {
+          "class_name": "Dense",
+          "config": {
+            "name": "dense_53",
+            "trainable": true,
+            "dtype": {
+              "module": "keras",
+              "class_name": "DTypePolicy",
+              "config": {
+                "name": "float32"
+              },
+              "registered_name": null
+            },
+            "units": 5,
+            "activation": "softmax",
+            "use_bias": true,
+            "kernel_initializer": {
+              "module": "keras.initializers",
+              "class_name": "GlorotUniform",
+              "config": {
+                "seed": null
+              },
+              "registered_name": null
+            },
+            "bias_initializer": {
+              "module": "keras.initializers",
+              "class_name": "Zeros",
+              "config": {},
+              "registered_name": null
+            },
+            "kernel_regularizer": null,
+            "bias_regularizer": null,
+            "kernel_constraint": null,
+            "bias_constraint": null
+          },
+          "name": "dense_53",
+          "inbound_nodes": [
+            {
+              "args": [
+                {
+                  "class_name": "__keras_tensor__",
+                  "config": {
+                    "shape": [
+                      null,
+                      256
+                    ],
+                    "dtype": "float32",
+                    "keras_history": [
+                      "dense_52",
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ],
+              "kwargs": {}
+            }
+          ]
+        }
+      ],
+      "input_layers": [
+        [
+          "input_layer_26",
+          0,
+          0
+        ]
+      ],
+      "output_layers": [
+        [
+          "dense_53",
+          0,
+          0
+        ]
+      ]
+    }
+  },
+  "{\"loss\"": {
+    "loss": "sparse_categorical_crossentropy",
+    "loss_weights": null,
+    "metrics": [
+      "accuracy"
+    ],
+    "weighted_metrics": null,
+    "run_eagerly": false,
+    "steps_per_execution": 1,
+    "jit_compile": false,
+    "optimizer_config": {
+      "class_name": "Adam",
+      "config": {
+        "name": "adam",
+        "learning_rate": 0.0010000000474974513,
+        "weight_decay": null,
+        "clipnorm": null,
+        "global_clipnorm": null,
+        "clipvalue": null,
+        "use_ema": false,
+        "ema_momentum": 0.99,
+        "ema_overwrite_frequency": null,
+        "loss_scale_factor": null,
+        "gradient_accumulation_steps": null,
+        "beta_1": 0.9,
+        "beta_2": 0.999,
+        "epsilon": 1e-07,
+        "amsgrad": false
+      }
+    }
+  }
+}

@@ -1,0 +1,144 @@
+Runtime: {'device': 'cpu', 'workers': ['cpu0'], 'cuda_mapping': {'cpu0': ''}, 'parallel_workers': 1, 'visibility_checked': False}; invocation: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/invocation_1791081045085514872.json
+Planned fits: 16 small smoke fits
+Conv2D focal-loss Stage-1 sweep
+Experiment key: 21fa84e400c6
+Execution workers: ['cpu0']; four folds queued across these workers
+Betas: [0.99]
+Focal gammas: [0.5]
+Training seeds: [0]
+Fixed folds: 4 (fold seed 0)
+Configurations: 1
+Fits: 4
+Training: fixed epochs, ordinary shuffled batches
+Evaluation: pooled KDDTrain+ out-of-fold raw argmax
+CTGAN/minority batches/score scaling: OFF
+KDDTest+ accessed: NO
+Preparing four leakage-free fold caches...
+  fold 1: train=75, validation=25, validation U2R=5
+  fold 2: train=75, validation=25, validation U2R=5
+  fold 3: train=75, validation=25, validation U2R=5
+  fold 4: train=75, validation=25, validation U2R=5
+Protocol: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_21fa84e400c6_protocol.json
+Plan: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_21fa84e400c6_plan.csv
+Overall progress: [------------------------------]   0.00% (0/4)
+[GPU cpu0 | fold 1] START conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f1
+[GPU cpu0 | fold 1] COMPLETED conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f1 (0.1 min)
+Overall progress: [#######-----------------------]  25.00% (1/4)
+[GPU cpu0 | fold 2] START conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f2
+[GPU cpu0 | fold 2] COMPLETED conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f2 (0.1 min)
+Overall progress: [###############---------------]  50.00% (2/4)
+[GPU cpu0 | fold 3] START conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f3
+[GPU cpu0 | fold 3] COMPLETED conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f3 (0.1 min)
+Overall progress: [######################--------]  75.00% (3/4)
+[GPU cpu0 | fold 4] START conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f4
+[GPU cpu0 | fold 4] COMPLETED conv2d_focal_stage1_21fa84e400c6_b0p99_g0p5_8f326cecd7_s0_f4 (0.1 min)
+Overall progress: [##############################] 100.00% (4/4)
+
+=== Ranked Conv2D focal settings ===
+ rank  beta  focal_gamma  runs  total_fits   Rare Macro-F1        Macro-F1     Macro Recall         Accuracy              MCC    R2L Precision       R2L Recall           R2L F1   U2R Precision      U2R Recall          U2R F1
+    1  0.99          0.5     1           4 8.33% +/- 0.00% 8.48% +/- 0.00% 16.00% +/- 0.00% 16.00% +/- 0.00% -7.94% +/- 0.00% 18.75% +/- 0.00% 15.00% +/- 0.00% 16.67% +/- 0.00% 0.00% +/- 0.00% 0.00% +/- 0.00% 0.00% +/- 0.00%
+
+Best beta: 0.99
+Best focal gamma: 0.5
+Fold runs: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_21fa84e400c6_fold_runs.csv
+Seed-level pooled OOF metrics: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_21fa84e400c6_seed_metrics.csv
+Numeric ranking: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_21fa84e400c6_summary.csv
+Readable ranking: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_21fa84e400c6_summary.txt
+Best configuration: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_21fa84e400c6_best_config.json
+Latest-results pointer: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_stage1_latest.json
+Conv2D focal-loss + minority-batch OOF evaluation
+Training key: bf7f08ac7b7f
+Scoring key: 0fbf4b8a212f
+Execution workers: ['cpu0']
+CUDA allocation mapping: {'cpu0': ''}
+Seeds: [0]; folds: 4 (seed 0)
+Frozen focal settings: beta=0.99, gamma=0.5
+Balanced-batch trainings: 4
+Guaranteed per batch: 1 R2L + 1 U2R
+Decision policy: raw multiclass argmax
+Score scaling: NO; CTGAN: NO
+KDDTest+ accessed: NO
+Preparing four leakage-free fold caches...
+  fold 1: train=75, validation=25
+  fold 2: train=75, validation=25
+  fold 3: train=75, validation=25
+  fold 4: train=75, validation=25
+[GPU cpu0 (CUDA ) | fold 1] START conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f1
+[GPU cpu0 (CUDA ) | fold 1] COMPLETED conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f1 (0.1 min)
+Training progress: [#######-----------------------]  25.00% (1/4)
+[GPU cpu0 (CUDA ) | fold 2] START conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f2
+[GPU cpu0 (CUDA ) | fold 2] COMPLETED conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f2 (0.1 min)
+Training progress: [###############---------------]  50.00% (2/4)
+[GPU cpu0 (CUDA ) | fold 3] START conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f3
+[GPU cpu0 (CUDA ) | fold 3] COMPLETED conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f3 (0.1 min)
+Training progress: [######################--------]  75.00% (3/4)
+[GPU cpu0 (CUDA ) | fold 4] START conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f4
+[GPU cpu0 (CUDA ) | fold 4] COMPLETED conv2d_focal_batch_cv_training_bf7f08ac7b7f_s0_f4 (0.1 min)
+Training progress: [##############################] 100.00% (4/4)
+Training complete. Aggregating raw-argmax OOF metrics...
+
+=== Conv2D focal + minority-batch OOF results ===
+ rank  r2l_score_coefficient  u2r_score_coefficient  eligible_mean  eligible_all_seeds  meets_mean_macro_f1_guard  meets_mean_r2l_precision_guard  meets_mean_u2r_precision_guard Minimum Minority Recall Mean Minority Recall    Rare Macro-F1         Macro-F1     Macro Recall         Accuracy             MCC    R2L Precision       R2L Recall           R2L F1    U2R Precision       U2R Recall           U2R F1
+    1                    1.0                    1.0           True                True                       True                            True                            True        25.00% +/- 0.00%     37.50% +/- 0.00% 29.98% +/- 0.00% 16.51% +/- 0.00% 22.00% +/- 0.00% 22.00% +/- 0.00% 2.77% +/- 0.00% 20.00% +/- 0.00% 25.00% +/- 0.00% 22.22% +/- 0.00% 30.30% +/- 0.00% 50.00% +/- 0.00% 37.74% +/- 0.00%
+Per-seed raw metrics: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_batch_cv_training_bf7f08ac7b7f_raw_seed_metrics.csv
+Numeric mean/std summary: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_batch_cv_bf7f08ac7b7f_0fbf4b8a212f_ranking.csv
+Readable summary: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_batch_cv_bf7f08ac7b7f_0fbf4b8a212f_summary.txt
+Latest-results pointer: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/conv2d_focal_batch_cv_latest.json
+Final frozen neural-configuration evaluation on KDDTest+
+Experiment key: e6f5441c61f5
+Architectures: ['conv2d', 'conv1d', 'transformer', 'mlp']
+Configurations: ['Baseline', 'Focal + batching + scaling']
+Seeds: [0]
+Fits: 8 (4 architectures x 2 configurations x 1 seeds)
+Execution workers: ['cpu0']
+Train: all KDDTrain+; final evaluation: untouched KDDTest+
+Baseline: cross-entropy + ordinary batches + raw argmax
+Focal + batching + scaling: focal loss + minority batches + frozen score scaling
+KDDTest+ is not used for tuning or model selection.
+Preparing full KDDTrain+ / untouched KDDTest+ feature cache...
+CUDA allocation mapping: {'cpu0': ''}
+Overall progress: [------------------------------]   0.00% (0/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_conv2d_baseline_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_conv2d_baseline_s0 (0.1 min)
+Overall progress: [###---------------------------]  12.50% (1/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_conv2d_full_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_conv2d_full_s0 (0.1 min)
+Overall progress: [#######-----------------------]  25.00% (2/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_conv1d_baseline_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_conv1d_baseline_s0 (0.1 min)
+Overall progress: [###########-------------------]  37.50% (3/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_conv1d_full_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_conv1d_full_s0 (0.1 min)
+Overall progress: [###############---------------]  50.00% (4/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_transformer_baseline_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_transformer_baseline_s0 (0.1 min)
+Overall progress: [##################------------]  62.50% (5/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_transformer_full_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_transformer_full_s0 (0.1 min)
+Overall progress: [######################--------]  75.00% (6/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_mlp_baseline_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_mlp_baseline_s0 (0.1 min)
+Overall progress: [##########################----]  87.50% (7/8)
+[GPU cpu0] START final_baseline_vs_full_kddtest_e6f5441c61f5_mlp_full_s0
+[GPU cpu0] DONE final_baseline_vs_full_kddtest_e6f5441c61f5_mlp_full_s0 (0.1 min)
+Overall progress: [##############################] 100.00% (8/8)
+
+=== Final KDDTest+ neural-configuration results ===
+      model              configuration  runs        accuracy             mcc        macro_f1    macro_recall         rare_f1   r2l_precision      r2l_recall   u2r_precision      u2r_recall
+     Conv2D                   Baseline     1 24.00% +/- nan%  5.86% +/- nan% 19.65% +/- nan% 24.00% +/- nan% 33.33% +/- nan%  0.00% +/- nan%  0.00% +/- nan% 75.00% +/- nan% 60.00% +/- nan%
+     Conv2D Focal + batching + scaling     1 20.00% +/- nan%  0.00% +/- nan%  6.67% +/- nan% 20.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%
+     Conv1D                   Baseline     1 32.00% +/- nan% 16.25% +/- nan% 25.84% +/- nan% 32.00% +/- nan% 28.89% +/- nan% 50.00% +/- nan% 40.00% +/- nan% 10.00% +/- nan% 20.00% +/- nan%
+     Conv1D Focal + batching + scaling     1 36.00% +/- nan% 22.88% +/- nan% 25.11% +/- nan% 36.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%
+Transformer                   Baseline     1 20.00% +/- nan%  0.00% +/- nan%  6.67% +/- nan% 20.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%
+Transformer Focal + batching + scaling     1 20.00% +/- nan%  0.00% +/- nan%  6.90% +/- nan% 20.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%
+        MLP                   Baseline     1 28.00% +/- nan% 11.02% +/- nan% 18.67% +/- nan% 28.00% +/- nan% 13.33% +/- nan% 20.00% +/- nan% 40.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%
+        MLP Focal + batching + scaling     1 20.00% +/- nan%  0.00% +/- nan% 10.00% +/- nan% 20.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%  0.00% +/- nan%
+
+Saved results:
+  all_runs: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/final_baseline_vs_full_kddtest_e6f5441c61f5_all_runs.csv
+  summary: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/final_baseline_vs_full_kddtest_e6f5441c61f5_summary.csv
+  formatted_summary: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/final_baseline_vs_full_kddtest_e6f5441c61f5_summary_formatted.csv
+  paired_deltas: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/final_baseline_vs_full_kddtest_e6f5441c61f5_paired_deltas.csv
+  paired_delta_summary: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/final_baseline_vs_full_kddtest_e6f5441c61f5_paired_delta_summary.csv
+  latest pointer: /home/gvadzabd/cnn_reviewer_preflight_20261003_8ed98c4078/cpu smoke outputs/smoke_results/final_baseline_vs_full_kddtest_latest.json
+Smoke check passed: 16 one-epoch fits. These are not paper results.

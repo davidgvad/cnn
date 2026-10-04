@@ -1,0 +1,32 @@
+{
+  "remote_directory": "/home/gvadzabd/cnn/analysis/paper_reverification_20261003_866aebf4",
+  "script_sha256": "61741cf1a325dd70cbb8a1630df7d3fb3024d82e85307eadf74e1f4cc3e20291",
+  "claims_sha256": "d0bd53e22e4e79d5fbf94fd3f37e43ed2df88e9412263df702a9ae36b99ae076",
+  "downloaded_file_checks": [
+    {
+      "filename": "recomputed_architecture_summary.csv",
+      "sha256": "09897a1edb0164923b763411773e6a0a2ba9544efc8be612e0bab11af7cc9e43",
+      "bytes": 1569
+    },
+    {
+      "filename": "recomputed_coefficient_rankings.csv",
+      "sha256": "4da3e3713f15fe0841fd330b6da65650a2cc530d832008e590119841c66ea9d9",
+      "bytes": 1001369
+    },
+    {
+      "filename": "recomputed_seed_metrics.csv",
+      "sha256": "4b51278d3422ef3e44bf67a5837b2cec84672f151f9c3c7ec84a36a9506e44c6",
+      "bytes": 72694
+    },
+    {
+      "filename": "recomputed_summary.csv",
+      "sha256": "26694c4536ce23c83eed7422453957cafa5660faa3d6bc517ad46ebc8988795f",
+      "bytes": 32804
+    },
+    {
+      "filename": "verification.json",
+      "sha256": "db473ba6b50ca83c95d43c99f3468852cf54ff0b42e75550f0eb11669470bc57",
+      "bytes": 55211
+    }
+  ]
+}

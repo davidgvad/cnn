@@ -1,0 +1,53 @@
+Run this complete block in the server terminal from /home/gvadzabd/cnn.
+It reads existing metadata, CSVs, source hashes and launcher scripts, and prints
+one JSON object. Paste the output into the conversation. It creates no files
+and does not import or run any experiment code, train models, or run inference.
+
+python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+root = Path('/home/gvadzabd/cnn')
+selection_path = root / 'results/variant_specific_scaling_selection_ea63ca7e718d.json'
+evaluation_path = root / 'results/variant_specific_scaling_kddtest_d5c1c2bb3050_protocol.json'
+selection = json.loads(selection_path.read_text())
+evaluation = json.loads(evaluation_path.read_text())
+paths = {selection_path, evaluation_path}
+for regimes in selection['source_metadata'].values():
+    for record in regimes.values():
+        for key in ('protocol', 'best_config'):
+            if record.get(key):
+                paths.add(Path(record[key]))
+for regimes in evaluation['test_source_metadata'].values():
+    for seeds in regimes.values():
+        for record in seeds.values():
+            paths.add(Path(record['run_metadata_path']))
+            cache = record['feature_cache_metadata_path']
+            paths.add(Path(cache))
+            paths.add(Path(cache.replace('_feature_cache.json', '_protocol.json')))
+records = []
+for path in sorted(paths):
+    item = {'path': str(path), 'exists': path.is_file()}
+    if path.is_file():
+        data = path.read_bytes()
+        item.update(sha256=hashlib.sha256(data).hexdigest(), content=json.loads(data))
+    records.append(item)
+tables = {}
+for document in (selection, evaluation):
+    for name, value in document['outputs'].items():
+        if name != 'rankings':
+            path = Path(value)
+            tables[str(path)] = {'exists': path.is_file()}
+            if path.is_file():
+                data = path.read_bytes()
+                tables[str(path)].update(sha256=hashlib.sha256(data).hexdigest(), csv_text=data.decode('utf-8'))
+source_hashes = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+                 for path in sorted((root / 'src').glob('*.py'))}
+launchers = {name: (root / name).read_text(errors='replace')
+             for name in ('file.sh', 'file.sh.save', 'file.sh.save.1', 'gan.sh')
+             if (root / name).is_file()}
+print(json.dumps({'metadata': records, 'tables': tables,
+                  'current_source_hashes': source_hashes,
+                  'launcher_scripts': launchers}, indent=2, sort_keys=True))
+PY

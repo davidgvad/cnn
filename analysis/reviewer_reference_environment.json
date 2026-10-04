@@ -1,0 +1,16 @@
+{
+  "python": "3.12.7",
+  "packages": {
+    "tensorflow": "2.16.2",
+    "keras": "3.13.2",
+    "numpy": "1.26.4",
+    "pandas": "2.2.2",
+    "scikit-learn": "1.5.1",
+    "scipy": "1.13.1",
+    "matplotlib": "3.9.2",
+    "seaborn": "0.13.2",
+    "h5py": "3.11.0",
+    "protobuf": "4.25.3",
+    "ml-dtypes": "0.3.2"
+  }
+}

@@ -1,0 +1,17 @@
+architecture,training_regime,r2l_divisor,u2r_divisor
+conv2d,Baseline,1.15,0.7
+conv2d,Focal only,1.0,1.9
+conv2d,Batching only,1.0,10.0
+conv2d,Focal + batching,1.15,8.0
+conv1d,Baseline,0.85,0.4
+conv1d,Focal only,0.7,1.0
+conv1d,Batching only,1.0,1.75
+conv1d,Focal + batching,1.3,8.0
+transformer,Baseline,0.85,0.25
+transformer,Focal only,0.55,1.9
+transformer,Batching only,1.3,6.0
+transformer,Focal + batching,1.0,10.0
+mlp,Baseline,1.3,0.25
+mlp,Focal only,1.0,0.85
+mlp,Batching only,1.3,7.0
+mlp,Focal + batching,1.45,4.5

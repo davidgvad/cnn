@@ -1,0 +1,79 @@
+{
+  "data/synth_labels.csv": {
+    "data_rows": 35134,
+    "header": [
+      "filename",
+      "class"
+    ],
+    "width_counts": {
+      "2": 35135
+    },
+    "class_counts": {
+      "2": 2713,
+      "1": 32278,
+      "3": 143
+    }
+  },
+  "data/test_labels.csv": {
+    "data_rows": 22544,
+    "header": [
+      "filename",
+      "class"
+    ],
+    "width_counts": {
+      "2": 22545
+    },
+    "class_counts": {
+      "0": 7458,
+      "4": 9711,
+      "1": 2421,
+      "2": 2887,
+      "3": 67
+    }
+  },
+  "data/train_labels.csv": {
+    "data_rows": 125973,
+    "header": [
+      "filename",
+      "class"
+    ],
+    "width_counts": {
+      "2": 125974
+    },
+    "class_counts": {
+      "4": 67343,
+      "0": 45927,
+      "2": 995,
+      "1": 11656,
+      "3": 52
+    }
+  },
+  "results/cnn2d_grid_plan.csv": {
+    "data_rows": 324,
+    "header": [
+      "config_id",
+      "config_key",
+      "experiment_key",
+      "r2l_synth_count",
+      "target_r2l",
+      "cb_beta",
+      "focal_gamma",
+      "seed",
+      "run_name"
+    ],
+    "width_counts": {
+      "9": 325
+    },
+    "column_unique_counts": {
+      "config_id": 108,
+      "config_key": 108,
+      "experiment_key": 1,
+      "r2l_synth_count": 1,
+      "target_r2l": 1,
+      "cb_beta": 9,
+      "focal_gamma": 12,
+      "seed": 3,
+      "run_name": 324
+    }
+  }
+}

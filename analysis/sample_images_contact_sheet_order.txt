@@ -1,0 +1,1 @@
+Read left to right, top to bottom: train 0..20, test 0..20, synth 0..20. Each group occupies three rows.

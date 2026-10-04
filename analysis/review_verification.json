@@ -1,0 +1,19 @@
+{
+  "links_checked": "PASS",
+  "review_rows": 220,
+  "python_sources": 62,
+  "new_audit_scripts_syntax": "PASS",
+  "expected_u2r_draws_per_full_epoch": 544.6899970628626,
+  "majority_expected_unique_epoch_fraction": 0.629922320400151,
+  "ordinary_batch_probability_no_u2r": 0.8996023939840273,
+  "legacy_matrix_accuracy": 0.8699875798438609,
+  "legacy_class_f1": [
+    0.8974537359120635,
+    0.8150884697647287,
+    0.7431714023831347,
+    0.16,
+    0.9015518187715184
+  ],
+  "legacy_rare_f1": 0.4515857011915674,
+  "modern_numerical_results_reproduced": false
+}

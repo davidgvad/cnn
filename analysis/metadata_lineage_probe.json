@@ -1,0 +1,16 @@
+{
+  "metadata_check_accepted_incompatible_configuration": true,
+  "incompatible_fields": {
+    "loss": "categorical_crossentropy",
+    "cb_beta": 0.9,
+    "focal_gamma": 99.0,
+    "epochs_requested": 1,
+    "batch_size": 8,
+    "ctgan_used": true,
+    "model_parameters": 1,
+    "batching": "wrong_policy"
+  },
+  "scope": "metadata check only; array checker not invoked; no real experimental run asserted invalid",
+  "source": "src/tune_variant_specific_score_scaling.py",
+  "source_sha256": "61fc8dafaa58d75c4f6e31ddbfbf4dc7b5dbee485762383ec41284f96bcd2091"
+}

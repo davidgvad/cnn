@@ -1,0 +1,10 @@
+test_frozen_commands_keep_all_folds_seeds_and_batch_size_on_any_hardware (test_paper_reproduction.PaperReproductionTests.test_frozen_commands_keep_all_folds_seeds_and_batch_size_on_any_hardware) ... ok
+test_interactions_of_additive_factorial_are_zero (test_paper_reproduction.PaperReproductionTests.test_interactions_of_additive_factorial_are_zero) ... ok
+test_metrics_match_independent_sklearn_for_missing_and_rare_classes (test_paper_reproduction.PaperReproductionTests.test_metrics_match_independent_sklearn_for_missing_and_rare_classes) ... ok
+test_paper_configuration_is_free_of_machine_paths (test_paper_reproduction.PaperReproductionTests.test_paper_configuration_is_free_of_machine_paths) ... ok
+test_score_scaling_divides_scores_and_has_stable_tie_rule (test_paper_reproduction.PaperReproductionTests.test_score_scaling_divides_scores_and_has_stable_tie_rule) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.033s
+
+OK

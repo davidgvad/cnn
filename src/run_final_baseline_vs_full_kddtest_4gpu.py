@@ -43,6 +43,8 @@ import numpy as np
 import pandas as pd
 
 import run_no_ctgan_model_ablation_4gpu as core
+import experiment_runtime as runtime
+from paper_config import DEFAULT_CONFIG, load_config
 
 
 SCHEMA_VERSION = 1
@@ -75,8 +77,8 @@ FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
         "label": "Conv2D",
         "beta": 0.99,
         "focal_gamma": 0.50,
-        "r2l_score_coefficient": 1.00,
-        "u2r_score_coefficient": 4.00,
+        "r2l_score_coefficient": 1.15,
+        "u2r_score_coefficient": 8.00,
         "backbone": {
             "groups": 1,
             "base_filters": 64,
@@ -92,8 +94,8 @@ FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
         "label": "Conv1D",
         "beta": 0.99,
         "focal_gamma": 0.25,
-        "r2l_score_coefficient": 1.00,
-        "u2r_score_coefficient": 7.00,
+        "r2l_score_coefficient": 1.30,
+        "u2r_score_coefficient": 8.00,
         "backbone": {
             "groups": 1,
             "base_filters": 64,
@@ -126,8 +128,8 @@ FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
         "label": "MLP",
         "beta": 0.99,
         "focal_gamma": 0.25,
-        "r2l_score_coefficient": 0.40,
-        "u2r_score_coefficient": 1.90,
+        "r2l_score_coefficient": 1.45,
+        "u2r_score_coefficient": 4.50,
         "backbone": {
             "dense_units": 256,
             "dropout1": 0.25,
@@ -242,9 +244,11 @@ def prepare_train_test_cache(
     cache_path: Path,
     metadata_path: Path,
     experiment_key: str,
+    data_dir: Path | None = None,
 ) -> Dict[str, Any]:
-    train_path = repo_root / "data" / "KDDTrain+.txt"
-    test_path = repo_root / "data" / "KDDTest+.txt"
+    data_dir = data_dir or repo_root / "data"
+    train_path = data_dir / "KDDTrain+.txt"
+    test_path = data_dir / "KDDTest+.txt"
     if not train_path.is_file() or not test_path.is_file():
         raise FileNotFoundError(
             "Expected data/KDDTrain+.txt and data/KDDTest+.txt."
@@ -310,11 +314,7 @@ def run_worker(args: argparse.Namespace) -> None:
     from cnn_opt import BalancedBatchSequence  # type: ignore
 
     visible_gpus = tf.config.list_physical_devices("GPU")
-    if not args.allow_cpu and len(visible_gpus) != 1:
-        raise RuntimeError(
-            "Each worker must see exactly one GPU; TensorFlow sees "
-            f"{len(visible_gpus)}: {visible_gpus}."
-        )
+    runtime.validate_worker_devices(visible_gpus, allow_cpu=args.allow_cpu)
     for device in visible_gpus:
         try:
             tf.config.experimental.set_memory_growth(device, True)
@@ -347,7 +347,11 @@ def run_worker(args: argparse.Namespace) -> None:
     architecture = str(args.worker_architecture)
     variant = str(args.worker_variant)
     seed = int(args.worker_seed)
-    frozen = FROZEN_CONFIG[architecture]
+    frozen = dict(FROZEN_CONFIG[architecture])
+    if variant in SCORE_SCALING_VARIANTS:
+        chosen = load_config(args.paper_config)["architectures"][architecture]["score_scaling"]
+        pair = chosen["baseline" if variant == "scaling_only" else "focal_batch"]
+        frozen.update(r2l_score_coefficient=pair["r2l"], u2r_score_coefficient=pair["u2r"])
     tf.keras.utils.set_random_seed(seed)
     np.random.seed(seed)
 
@@ -509,6 +513,7 @@ def run_worker(args: argparse.Namespace) -> None:
         "assigned_gpu": os.environ.get("EXPERIMENT_GPU_ID", ""),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "tensorflow_visible_gpu_count": len(visible_gpus),
+        "runtime_device": "cpu" if args.allow_cpu else "gpu",
         "deterministic_ops_requested": bool(args.deterministic_ops),
         "deterministic_ops_enabled": deterministic_enabled,
         "tensorflow_version": core.package_version("tensorflow"),
@@ -593,6 +598,7 @@ def build_worker_command(
     ]
     if args.allow_cpu:
         command.append("--allow-cpu")
+    command += ["--paper-config", str(args.paper_config)]
     if args.deterministic_ops:
         command.append("--deterministic-ops")
     return command
@@ -766,14 +772,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Final fixed configurations to train and evaluate.",
     )
     parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
-    parser.add_argument("--gpus", nargs="+", default=["0", "1", "2", "3"])
+    runtime.add_arguments(parser)
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--minority-per-batch", type=int, default=1)
     parser.add_argument("--fit-verbose", type=int, choices=[0, 1, 2], default=2)
-    parser.add_argument("--results-dir", type=Path, default=None)
+    parser.add_argument("--paper-config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--deterministic-ops", action="store_true")
-    parser.add_argument("--allow-cpu", action="store_true")
     parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
 
@@ -789,6 +794,13 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--worker-result-path", help=argparse.SUPPRESS)
     parser.add_argument("--worker-prediction-path", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    paper = load_config(args.paper_config)
+    for name in args.architectures:
+        settings = paper["architectures"][name]
+        if (settings["focal_beta"], settings["focal_gamma"], settings["parameters"]) != (
+            FROZEN_CONFIG[name]["beta"], FROZEN_CONFIG[name]["focal_gamma"], FROZEN_CONFIG[name]["backbone"]["expected_parameters"]
+        ):
+            parser.error(f"Final fitting's frozen model settings differ from --paper-config: {name}")
     if args.epochs <= 0:
         parser.error("--epochs must be positive.")
     if args.batch_size <= 0:
@@ -797,8 +809,6 @@ def parse_arguments() -> argparse.Namespace:
         parser.error("--minority-per-batch must be positive.")
     if not args.seeds:
         parser.error("At least one seed is required.")
-    if not args.gpus and not args.allow_cpu:
-        parser.error("At least one GPU is required unless --allow-cpu is used.")
     return args
 
 
@@ -821,15 +831,19 @@ def main() -> None:
         run_worker(args)
         return
 
+    paper = load_config(args.paper_config)
     repo_root = Path(__file__).resolve().parents[1]
-    results_dir = (args.results_dir or (repo_root / "results")).resolve()
+    results_dir = runtime.results_directory(args, repo_root)
     results_dir.mkdir(parents=True, exist_ok=True)
     architectures = list(dict.fromkeys(args.architectures))
     variants = list(dict.fromkeys(args.variants))
     seeds = list(dict.fromkeys(int(seed) for seed in args.seeds))
-    gpus = list(dict.fromkeys(str(gpu) for gpu in args.gpus))
-    if args.allow_cpu and not gpus:
-        gpus = [""]
+    try:
+        runtime_config = runtime.select_runtime(args)
+    except (ValueError, RuntimeError) as error:
+        raise SystemExit(str(error)) from error
+    args.allow_cpu = runtime_config.device == "cpu"
+    gpus = list(runtime_config.workers)
 
     protocol = {
         "schema_version": SCHEMA_VERSION,
@@ -840,7 +854,11 @@ def main() -> None:
         "epochs": int(args.epochs),
         "batch_size": int(args.batch_size),
         "minority_per_batch_per_class": int(args.minority_per_batch),
-        "frozen_config": {name: FROZEN_CONFIG[name] for name in architectures},
+        "frozen_config": {name: {**FROZEN_CONFIG[name],
+                                 "r2l_score_coefficient": paper["architectures"][name]["score_scaling"]["focal_batch"]["r2l"],
+                                 "u2r_score_coefficient": paper["architectures"][name]["score_scaling"]["focal_batch"]["u2r"]}
+                          for name in architectures},
+        "paper_config_sha256": core.sha256_file(args.paper_config),
         "training_partition": "all KDDTrain+",
         "evaluation_partition": "untouched KDDTest+",
         "preprocessing_fit": "all KDDTrain+ only",
@@ -849,7 +867,14 @@ def main() -> None:
         "selection_on_kddtest": False,
         "ctgan_used": False,
     }
+    required_sources = [runtime.data_directory(args, repo_root) / n for n in ("KDDTrain+.txt", "KDDTest+.txt")]
+    required_sources += [repo_root / "src" / n for n in (
+        "run_final_baseline_vs_full_kddtest_4gpu.py", "experiment_runtime.py",
+        "run_no_ctgan_model_ablation_4gpu.py", "cnn_opt.py", "cnn_opt_1d_4gpu.py", "cnn_gan_foc.py")]
+    required_sources += [args.paper_config, repo_root / "src/paper_config.py"]
+    protocol["source_and_data_fingerprint"] = core.fingerprint_files(required_sources)
     experiment_key = stable_hash(protocol)
+    protocol["runtime"] = runtime_config.metadata()
     protocol["experiment_key"] = experiment_key
     if variants == DEFAULT_VARIANTS:
         output_stem = "final_baseline_vs_full_kddtest"
@@ -899,7 +924,7 @@ def main() -> None:
         f"{len(variants)} configurations x {len(seeds)} seeds)",
         flush=True,
     )
-    print(f"GPU workers: {gpus}", flush=True)
+    print(f"Execution workers: {gpus}", flush=True)
     print("Train: all KDDTrain+; final evaluation: untouched KDDTest+", flush=True)
     for variant in variants:
         focal = "focal loss" if variant in FOCAL_VARIANTS else "cross-entropy"
@@ -931,9 +956,10 @@ def main() -> None:
         cache_path,
         cache_metadata_path,
         experiment_key,
+        data_dir=runtime.data_directory(args, repo_root),
     )
     script_path = Path(__file__).resolve()
-    gpu_tokens = resolve_cuda_tokens(gpus)
+    gpu_tokens = runtime_config.cuda_tokens
     pending = [
         plan
         for plan in plans

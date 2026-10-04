@@ -142,7 +142,13 @@ def resolve_recorded_path(
 ) -> Path:
     """Resolve an absolute or repository-relative path stored in JSON."""
     path = Path(raw_path).expanduser()
-    candidates = [path] if path.is_absolute() else []
+    # OOF pointers name siblings of the recording JSON. Prefer the current
+    # artifact tree when results have been moved to a reviewer's machine.
+    candidates = []
+    if recording_path is not None and path.is_absolute():
+        candidates.append(recording_path.parent / path.name)
+    if path.is_absolute():
+        candidates.append(path)
     candidates.append(repo_root / path)
     if recording_path is not None:
         candidates.append(recording_path.parent / path)
@@ -275,6 +281,8 @@ def load_oof_paths(
     architecture: str,
     base_training: str,
     seeds: Sequence[int],
+    *,
+    data_dir: Path | None = None,
 ) -> tuple[Dict[int, Path], Dict[str, Any]]:
     """Resolve one complete saved OOF probability matrix per seed."""
     pointer_path = find_latest_pointer(results_dir, architecture, base_training)
@@ -296,7 +304,7 @@ def load_oof_paths(
         raise ValueError(
             f"OOF protocol does not certify KDDTest+ was excluded: {protocol_path}"
         )
-    train_path = repo_root / "data" / "KDDTrain+.txt"
+    train_path = (data_dir or repo_root / "data") / "KDDTrain+.txt"
     recorded_train_hash = protocol.get("kddtrain_sha256")
     if recorded_train_hash is not None and train_path.is_file():
         if recorded_train_hash != core.sha256_file(train_path):
@@ -857,6 +865,8 @@ def load_test_run_metadata(
     architecture: str,
     test_variant: str,
     seed: int,
+    *,
+    data_dir: Path | None = None,
 ) -> tuple[Path, Dict[str, Any], Path, Dict[str, Any]]:
     prediction_dir = prediction_path.parent
     suffix = "_predictions"
@@ -899,8 +909,9 @@ def load_test_run_metadata(
         raise ValueError(
             f"Run/feature-cache hash mismatch for {prediction_path}"
         )
-    train_path = repo_root / "data" / "KDDTrain+.txt"
-    test_path = repo_root / "data" / "KDDTest+.txt"
+    data_dir = data_dir or repo_root / "data"
+    train_path = data_dir / "KDDTrain+.txt"
+    test_path = data_dir / "KDDTest+.txt"
     expected_source_hashes = {
         "train_sha256": core.sha256_file(train_path),
         "test_sha256": core.sha256_file(test_path),

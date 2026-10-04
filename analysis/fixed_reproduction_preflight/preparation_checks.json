@@ -1,0 +1,29 @@
+{
+  "remote_tools": "/home/gvadzabd/cnn/analysis/fixed_parameter_reproduction_20261003_2d17e4d4",
+  "reproduction_workspace": "/home/gvadzabd/cnn_fixed_reproduction_01",
+  "python_environment": {
+    "tensorflow": "2.16.2",
+    "keras": "3.13.2",
+    "numpy": "1.26.4",
+    "pandas": "2.2.2",
+    "scikit-learn": "1.5.1"
+  },
+  "dry_run_exit_code": 0,
+  "export_validation_exit_code": 0,
+  "controller_commands_checked": 17,
+  "planned_oof_fits": 192,
+  "planned_final_fits": 48,
+  "training_started": false,
+  "hyperparameter_search_started": false,
+  "exported_table_csvs": [
+    "table_01_class_counts.csv",
+    "table_02_architectures.csv",
+    "table_03_focal_parameters.csv",
+    "table_04_score_parameters.csv",
+    "table_05_oof_results.csv",
+    "table_06_kddtest_results.csv",
+    "table_07_architecture_summary.csv",
+    "table_08_secondary_test.csv",
+    "table_09_factorial_interactions.csv"
+  ]
+}

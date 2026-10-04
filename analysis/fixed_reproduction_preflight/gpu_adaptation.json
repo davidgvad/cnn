@@ -1,0 +1,40 @@
+{
+  "original_repository_modified": false,
+  "changes": [
+    {
+      "copied_source": "/home/gvadzabd/cnn_fixed_reproduction_01/src/tune_conv2d_focal_cv_4gpu.py",
+      "original_sha256": "11eeadfbdfd1adb78c9bb6b86a197264f10f09e65b29e5ae21349457b62d62bf",
+      "adapted_sha256": "c767109f4d268d130b2056943e654b43530ac2d7294ef807218a6be5f90f38ed",
+      "unchanged_functions": {
+        "aggregate_results": "63f4b805fe10fba99579c8f1074964d096a598f4af3bb9ce7dca6e7ccae22639",
+        "build_worker_command": "24c144117766d7656ff8a3b039d3392f9c8f8d590134abc8b13d377ea43bfe67",
+        "configurations": "1493f45494d491e4db18a64b845f4c6066f998a2b9ed2c91e154dd4889631e17",
+        "confusion_values": "b5c8aab97fc1438dcbd46159dda53172549f8426af894f7a6906bdeaa01d4400",
+        "fold_cache_is_complete": "89d57fe361c16b5f9804f6df7cf878bddb021bb070297dc3ecb61fdfd1d16bc0",
+        "fold_protocol_rows": "571a37ef52032fead665db9d86d1fded4f7d84a3304a0ebf9163581698c511a4",
+        "formatted_summary": "587153ad690cfc2309de20666a954e6358dcc12b97ae8b6544e23147496fa7e5",
+        "make_fixed_folds": "9e1bd335a920cdd5de6d42cffc0468e84f2c24bdc7529bca68bffd0687373764",
+        "prediction_artifact_is_complete": "e4ccd42046fc84e1b9d8b910fab03900ae306a93f692220028c68bd1a5e776ea",
+        "prepare_fold_cache": "03e55e3bffc2d918de9f5e191148959c777cea5384939a0c94f7d9f388e4bb3e",
+        "progress_bar": "8ab0c595e899df313e616f49df4d2bc3551fd71c42a76d78d6c80da890e63431",
+        "result_is_complete": "29fc600ea1041036e01701175385ee2271978ac14684c3f4db5e1c2efcbf2a2b",
+        "run_training_worker": "8f4cb95b2d1b5bb3d469456758720fd6549f4037eb3b13b2b2325d743d8b5257",
+        "stable_hash": "4a8265397edde607bc098b1c14f0919e8e1ea5c6f875ed085de21b017dfca47a",
+        "validate_arguments": "19f7680485b19e5e02a61f7d51a5d37aa5bf81cecd65ea2ea165321fb0cf0329",
+        "validate_parent_dependencies": "f1b03db259b4d3c3db38b16f9cf699086bbd738fee428b6d13c5c3e3ec54bf0c",
+        "value_token": "924bbe703a214dd8e63b32b85e98b0aa0e5cd32093e36bf5cec8a992cf64a354",
+        "worker_configuration": "a934e90e0eff67630f2c08c13792fcbbd370cf633705bd9337a0b74dd8fc831d"
+      },
+      "allowed_function_changes": [
+        "add_arguments",
+        "main"
+      ]
+    }
+  ],
+  "maximum_gpu_workers": 4,
+  "fold_count": 4,
+  "cpu_allowed": false,
+  "scheduling": "One thread per GPU; each thread executes its assigned folds serially",
+  "cuda_mapping": "Logical GPU IDs resolve within inherited CUDA_VISIBLE_DEVICES; CPU mode hides all GPUs",
+  "cpu_changes": null
+}

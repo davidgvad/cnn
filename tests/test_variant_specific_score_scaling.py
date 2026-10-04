@@ -19,6 +19,17 @@ import tune_variant_specific_score_scaling as subject  # noqa: E402
 
 
 class VariantSpecificScoreScalingTests(unittest.TestCase):
+    def test_relocated_pointer_prefers_current_artifact_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / "original" / "protocol.json"
+            relocated = root / "relocated" / "protocol.json"
+            original.parent.mkdir(); relocated.parent.mkdir()
+            original.write_text('{"copy":"original"}')
+            relocated.write_text('{"copy":"relocated"}')
+            result = subject.resolve_recorded_path(original, root, relocated.parent / "latest.json")
+            self.assertEqual(result, relocated.resolve())
+
     @staticmethod
     def write_oof(path: Path, labels: np.ndarray, probabilities: np.ndarray) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
