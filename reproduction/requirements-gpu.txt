@@ -1,3 +1,3 @@
-# Linux/WSL NVIDIA installation; CPU uses requirements.txt.
+# NVIDIA installation for Linux or WSL. Use requirements.txt for CPU.
 -r requirements.txt
 tensorflow[and-cuda]==2.16.2

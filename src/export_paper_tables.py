@@ -1,7 +1,7 @@
-"""Export all nine paper tables using fixed focal and score-scaling parameters.
+"""Generate all nine paper tables from OOF and KDDTest+ probabilities.
 
-Consumes newly trained OOF/test probabilities. No fitting or parameter search.
-Also accepts explicit original frozen artifacts for validating this exporter.
+Use the fixed focal and score-scaling settings. Original frozen artifacts can
+also be supplied to check the export. This script does not train models.
 """
 from __future__ import annotations
 

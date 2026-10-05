@@ -1,15 +1,46 @@
-# Validation of the portable reviewer workflow
+# Checks completed
 
-The package's execution code was tested in an isolated Linux checkout using Python 3.12.7 and the versions pinned in `requirements.txt`. The checkout path contained spaces, and commands ran from a different working directory. All included source and test files were checked against the local working copy by SHA-256.
+This file separates verification of saved results from fresh training. Original server prediction arrays and per-fit artifacts are not bundled. The compact reference tables are included for comparison.
 
-Completed checks:
+## Original paper results
 
-- 18 unit tests passed: hardware selection/allocation, fixed scientific command settings, metric formulas, factorial contrasts, scaling ties, native artifact validation, and moved-artifact resolution.
-- Complete plans passed on CPU and for explicitly requested two- and eight-GPU workers. Each retained 192 OOF fits and 48 final fits. GPU planning used dry runs; fitting on two/eight GPUs was not performed during this check.
-- The table exporter regenerated all nine tables from the original server probabilities. All 1,536 unrounded metric mean/SD values matched the independently verified reference summaries.
-- The CPU smoke stage passed sixteen one-epoch fits on sampled data: 100 training and 25 test rows, Conv2D focal-only/focal-plus-batching OOF workers, and baseline/focal-plus-batching final workers for all four backbones. Parameter counts and completed epochs matched. The test limited TensorFlow intra/inter-op threads to two to limit resource use on the shared machine.
-- The original server source, raw datasets and result pointers remained unchanged during the isolated checks.
+Frozen OOF selection `ea63ca7e718d` and test evaluation `d5c1c2bb3050` were checked against the supplied manuscript. Independent recalculation decoded 96 prediction files, recomputed 192 configuration-by-seed evaluations, and matched all 2,304 metric values against the saved seed CSVs. All sixteen score-scaling grids were checked independently, with 576 coefficient pairs per family. Main result checks passed.
 
-The reviewer workflow modifies the repository's controllers for portable hardware/path configuration and consistent paper score coefficients. Neural model builders, preprocessing, losses, guaranteed-batch sampling and fitting remain unchanged. Source comparisons checked this separately from the smoke execution.
+The KDDTest+ architecture mean is 21.46097664% for baseline and 31.00392951% for focal plus batching, a gain of 9.54295287 percentage points. The table exporter regenerated all nine tables from the original predictions, matching all 1,536 unrounded metric mean/SD comparisons.
 
-The full 240-fit paper repetition with chosen parameters fixed has not been performed by this package preparation. CPU smoke results are execution checks, not paper results. Full hyperparameter-selection history, including the unresolved earlier MLP search, is outside this fixed-parameter workflow. Cross-hardware numerical agreement must be evaluated after full fresh fitting; bitwise equality is not promised.
+Three manuscript entries need rounding corrections when calculated from unrounded means:
+
+- Focal plus scaling architecture range: **10.45**, rather than 10.44.
+- All-three-controls architecture range: **4.61**, rather than 4.60.
+- Transformer batching marginal contrast: **9.16** percentage points, rather than 9.15.
+
+The supplied references use the corrected arithmetic. Negative pairwise test interactions describe the architecture average, not every backbone.
+
+## Historical MLP focal search
+
+The full Firebird search `3cd4803ca07a` was recovered. All 216 completed fit records and their fold-prediction hashes passed checks. All 54 pooled OOF arrays were reconstructed exactly from fold predictions, 6,264 metric comparisons matched saved records, and all eighteen candidate ranks were recomputed independently.
+
+The winner was **β = 0.99, γ = 0.25**, with OOF Rare Macro-F1 **73.167367% ± 1.175557 percentage points** across the three seeds. Recorded completion times span August 4–5, 2026. The original table uses a later one-candidate rerun, `0d0a1b34a405`, at the same parameter pair, rather than the full-search predictions. This explains why the table's referenced protocol alone showed only twelve fits.
+
+The full search recorded TensorFlow 2.20.0, Keras 3.13.1, NumPy 2.0.2, and scikit-learn 1.7.2. The table-producing rerun recorded TensorFlow 2.16.2, Keras 3.13.2, NumPy 1.26.4, and scikit-learn 1.5.1. The requirements target the latter environment.
+
+## Fresh CPU/GPU comparison
+
+Firebird job `916187` completed 24 CPU fits and 24 Quadro RTX8000 GPU fits on the same node in 13 minutes 40 seconds. Both phases used Python 3.12.7, TensorFlow 2.16.2, Keras 3.13.2, the same code snapshot, four folds, and three seeds. β was fixed at 0.99 and only γ = 0.25 and 0.50 were compared.
+
+| Execution | γ = 0.25 | γ = 0.50 | Higher mean |
+|---|---:|---:|---:|
+| CPU | 72.27% ± 1.27 pp | 72.82% ± 0.31 pp | 0.50 |
+| GPU | 72.89% ± 0.54 pp | 71.81% ± 2.45 pp | 0.25 |
+
+Entries are OOF Rare Macro-F1 mean ± sample SD from the completed run summaries. Independent rescoring of these new prediction arrays remains pending. The GPU ranking agrees with the historical choice. This two-candidate comparison is not a new full search or an exact numerical reproduction. It supports sensitivity to execution conditions, without isolating the cause or establishing statistical superiority from three seeds. KDDTest+ was not accessed.
+
+## Portable workflow
+
+The cleaned repository passed 26 unit tests in Python 3.12.7 with the pinned dependencies. Checks cover independent metric calculations, search-to-evaluation handoff, artifact hashes, fresh-directory execution, and resume. CPU and two-GPU dry plans passed, including a copied checkout whose path contains spaces.
+
+Sixteen one-epoch CPU smoke fits passed. They covered all four model parameter counts and both focal-only and guaranteed-batch worker execution. The retained model, loss, batching, and preprocessing definitions match their pre-cleanup syntax trees. Both datasets, the paper configuration, and all ten reference CSVs remain byte-for-byte unchanged.
+
+The pinned environment passed real training steps on two Quadro RTX8000 GPUs. On RTX PRO 6000 Blackwell Server Edition GPUs, TensorFlow 2.16.2 detected the devices but failed while creating the model with `CUDA_ERROR_INVALID_HANDLE`. GPU-count configuration does not remove software/hardware compatibility requirements.
+
+A complete fresh repetition of all 240 fixed-parameter paper fits and the new full-search launcher has not been completed. Original runs did not enable deterministic operations, and fixed seeds do not ensure bitwise equality across hardware or library versions. [TensorFlow's determinism documentation](https://www.tensorflow.org/api_docs/python/tf/config/experimental/enable_op_determinism) explains these limits. Fresh runs should be compared using unrounded per-seed values and their variation.

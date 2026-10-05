@@ -1,26 +1,12 @@
-"""Final KDDTest+ comparison of pure and fully equipped neural models.
+"""Train the final models on KDDTrain+ and evaluate them on KDDTest+.
 
-All model and imbalance-control settings in this file are frozen constants from
-the earlier KDDTrain+ cross-validation experiments.  For every architecture and
-seed, the script trains once on all of KDDTrain+ and evaluates once on untouched
-KDDTest+.  It does not tune, checkpoint, or select anything using KDDTest+.
+Focal parameters and score coefficients are frozen before test evaluation.
+Each architecture and seed trains on all training rows, with no test-based
+tuning, checkpoints, or model selection.
 
-Supported variants
-------------------
-baseline
-    Cross-entropy, ordinary shuffled mini-batches, raw multiclass argmax.
-focal_only
-    Class-balanced focal loss, ordinary shuffled mini-batches, raw argmax.
-batch_only
-    Cross-entropy, minority-guaranteed mini-batches, raw argmax.
-scaling_only
-    Cross-entropy, ordinary shuffled mini-batches, frozen score scaling.
-full
-    Class-balanced focal loss, one guaranteed R2L and U2R example per batch,
-    and the architecture-specific frozen class-score coefficients.
-
-The controller runs independent fits concurrently, one process per GPU.  Child
-processes see exactly one CUDA device and therefore hold one complete model.
+The supported variants use cross-entropy or focal loss, ordinary or
+minority-guaranteed batches, and raw or scaled class scores. Independent fits
+run on the configured CPU or GPU workers.
 """
 
 from __future__ import annotations
@@ -70,15 +56,10 @@ VARIANT_LABELS = {
 }
 METRICS = list(core.METRICS)
 
-# These values were selected on KDDTrain+ validation predictions and are now
-# frozen. Score scaling divides a class probability by its coefficient.
+# Backbones stay fixed when the OOF search selects new loss parameters.
 FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
     "conv2d": {
         "label": "Conv2D",
-        "beta": 0.99,
-        "focal_gamma": 0.50,
-        "r2l_score_coefficient": 1.15,
-        "u2r_score_coefficient": 8.00,
         "backbone": {
             "groups": 1,
             "base_filters": 64,
@@ -92,10 +73,6 @@ FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     "conv1d": {
         "label": "Conv1D",
-        "beta": 0.99,
-        "focal_gamma": 0.25,
-        "r2l_score_coefficient": 1.30,
-        "u2r_score_coefficient": 8.00,
         "backbone": {
             "groups": 1,
             "base_filters": 64,
@@ -109,10 +86,6 @@ FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     "transformer": {
         "label": "Transformer",
-        "beta": 0.99,
-        "focal_gamma": 0.75,
-        "r2l_score_coefficient": 1.00,
-        "u2r_score_coefficient": 10.00,
         "backbone": {
             "d_model": 64,
             "num_heads": 4,
@@ -126,10 +99,6 @@ FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     "mlp": {
         "label": "MLP",
-        "beta": 0.99,
-        "focal_gamma": 0.25,
-        "r2l_score_coefficient": 1.45,
-        "u2r_score_coefficient": 4.50,
         "backbone": {
             "dense_units": 256,
             "dropout1": 0.25,
@@ -144,6 +113,19 @@ FROZEN_CONFIG: Dict[str, Dict[str, Any]] = {
 def stable_hash(value: Any, length: int = 12) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
+
+
+def frozen_settings(paper: Dict[str, Any], architecture: str, variant: str = "full") -> Dict[str, Any]:
+    chosen = paper["architectures"][architecture]
+    regime = "baseline" if variant == "scaling_only" else "focal_batch"
+    pair = chosen["score_scaling"][regime]
+    return {
+        **FROZEN_CONFIG[architecture],
+        "beta": chosen["focal_beta"],
+        "focal_gamma": chosen["focal_gamma"],
+        "r2l_score_coefficient": pair["r2l"],
+        "u2r_score_coefficient": pair["u2r"],
+    }
 
 
 def progress_bar(completed: int, total: int, width: int = 30) -> str:
@@ -306,8 +288,7 @@ def prepare_train_test_cache(
 
 
 def run_worker(args: argparse.Namespace) -> None:
-    # TensorFlow and model modules are deliberately imported only after the
-    # controller has restricted this process to one CUDA device.
+    # Configure device visibility before importing TensorFlow.
     import tensorflow as tf
 
     from cnn_gan_foc import ClassBalancedFocalLoss  # type: ignore
@@ -347,11 +328,7 @@ def run_worker(args: argparse.Namespace) -> None:
     architecture = str(args.worker_architecture)
     variant = str(args.worker_variant)
     seed = int(args.worker_seed)
-    frozen = dict(FROZEN_CONFIG[architecture])
-    if variant in SCORE_SCALING_VARIANTS:
-        chosen = load_config(args.paper_config)["architectures"][architecture]["score_scaling"]
-        pair = chosen["baseline" if variant == "scaling_only" else "focal_batch"]
-        frozen.update(r2l_score_coefficient=pair["r2l"], u2r_score_coefficient=pair["u2r"])
+    frozen = frozen_settings(load_config(args.paper_config), architecture, variant)
     tf.keras.utils.set_random_seed(seed)
     np.random.seed(seed)
 
@@ -782,7 +759,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
 
-    # Internal worker arguments. Users run the controller, not these directly.
+    # Arguments passed from the controller to each worker.
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--experiment-key", default="", help=argparse.SUPPRESS)
     parser.add_argument("--worker-architecture", choices=DEFAULT_ARCHITECTURES, help=argparse.SUPPRESS)
@@ -795,12 +772,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--worker-prediction-path", help=argparse.SUPPRESS)
     args = parser.parse_args()
     paper = load_config(args.paper_config)
+    if paper.get("parameter_selection_source", {}).get("parameters_fixed") is not True:
+        parser.error("Freeze both focal and score-scaling choices before final evaluation.")
     for name in args.architectures:
         settings = paper["architectures"][name]
-        if (settings["focal_beta"], settings["focal_gamma"], settings["parameters"]) != (
-            FROZEN_CONFIG[name]["beta"], FROZEN_CONFIG[name]["focal_gamma"], FROZEN_CONFIG[name]["backbone"]["expected_parameters"]
-        ):
-            parser.error(f"Final fitting's frozen model settings differ from --paper-config: {name}")
+        if settings["parameters"] != FROZEN_CONFIG[name]["backbone"]["expected_parameters"]:
+            parser.error(f"The configured parameter count differs from the fixed backbone: {name}")
     if args.epochs <= 0:
         parser.error("--epochs must be positive.")
     if args.batch_size <= 0:
@@ -854,10 +831,7 @@ def main() -> None:
         "epochs": int(args.epochs),
         "batch_size": int(args.batch_size),
         "minority_per_batch_per_class": int(args.minority_per_batch),
-        "frozen_config": {name: {**FROZEN_CONFIG[name],
-                                 "r2l_score_coefficient": paper["architectures"][name]["score_scaling"]["focal_batch"]["r2l"],
-                                 "u2r_score_coefficient": paper["architectures"][name]["score_scaling"]["focal_batch"]["u2r"]}
-                          for name in architectures},
+        "frozen_config": {name: frozen_settings(paper, name) for name in architectures},
         "paper_config_sha256": core.sha256_file(args.paper_config),
         "training_partition": "all KDDTrain+",
         "evaluation_partition": "untouched KDDTest+",

@@ -1,27 +1,13 @@
-"""Tune Conv1D class-balanced focal loss with fixed four-fold OOF validation.
+"""Tune Conv1D focal loss using four-fold KDDTrain+ OOF predictions.
 
-Default experiment
-------------------
-* Model: the fixed 109,797-parameter Conv1D used by
-  ``cnn_opt_1d_4gpu.py``.
-* Data: KDDTrain+ only. KDDTest+ and synthetic data are never accessed.
-* Grid: beta in {0.99, 0.999, 0.9999} and
-  gamma in {0.25, 0.5, 0.75, 1.0, 1.5, 2.0}.
-* Repetition: training seeds {0, 1, 2} on one frozen four-fold split.
-* Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.
+The default grid combines beta values 0.99, 0.999, and 0.9999 with gamma
+values 0.25, 0.5, 0.75, 1.0, 1.5, and 2.0. Each pair uses seeds 0, 1, and 2
+and 25 epochs with shuffled batches. KDDTest+ and synthetic rows are not used.
 
-Independent fold fits are distributed across the requested GPU workers. With
-two GPUs, two folds train concurrently and the remaining folds follow from the
-same work queue. The four predictions are then placed back in original row
-order to form one complete out-of-fold prediction vector. Metrics are
-calculated once on that vector for each seed, followed by mean and sample
-standard deviation across the three seeds.
-
-Each fit runs in a fresh subprocess on CPU or exactly one visible GPU. Completed
-artifacts are validated and reused when the same command is rerun.
-
-This is a direct Python launcher for the regular GPU server; it does not
-submit a Slurm job.
+Preprocessing fits on training folds only. Held-out probabilities are joined
+in the original row order before calculating each seed's metrics and the
+mean and sample standard deviation across seeds. Fits run in separate CPU
+or GPU workers. Completed artifacts are checked and reused.
 """
 
 from __future__ import annotations
@@ -363,8 +349,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
 
     from cnn_gan_foc import ClassBalancedFocalLoss  # type: ignore
 
-    # Import here, after the controller has restricted CUDA_VISIBLE_DEVICES
-    # for this child process. cnn_opt_1d_4gpu imports TensorFlow at module load.
+    # Configure device visibility before importing TensorFlow.
     from cnn_opt_1d_4gpu import build_opt_cnn_1d  # type: ignore
 
     cache_path = Path(args.worker_cache_path)
@@ -1372,7 +1357,7 @@ def main() -> None:
                 runtime,
                 f"{run_name}: exit={completed.returncode}, log={log_path}",
             )
-        except Exception as error:  # Preserve resumability for controller failures.
+        except Exception as error:  # Save failure details so the run can resume.
             runtime = time.perf_counter() - started
             return (
                 "failed",
@@ -1393,7 +1378,7 @@ def main() -> None:
             fold_id = int(plan["fold_id"])
             try:
                 status, runtime, failure = execute_plan(gpu, cuda_token, plan)
-            except Exception as error:  # Catch failures before log creation too.
+            except Exception as error:  # Report failures that occur before the log is created.
                 status = "failed"
                 runtime = 0.0
                 failure = f"{run_name}: controller error={error!r}"

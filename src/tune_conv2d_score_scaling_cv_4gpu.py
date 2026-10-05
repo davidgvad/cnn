@@ -1,14 +1,10 @@
-"""Evaluate raw or score-scaled neural models from leakage-free OOF predictions.
+"""Run baseline, batching, or focal-plus-batching OOF experiments.
 
-The shared runner supports pure cross-entropy baselines, batch-only ablations,
-and the focal-loss plus minority-batch pipeline.  For score-scaling searches it
-trains one model for each of four fixed folds and three seeds, restores each
-seed's folds to original row order, and searches R2L/U2R coefficient pairs from
-the saved probabilities without retraining.
+Each seed trains four fixed folds and restores predictions to the original
+row order. Score coefficients can then be searched without retraining.
 
-KDDTest+ and synthetic data are never accessed. The held-out fold is not
-passed to model.fit: training uses a fixed epoch budget with no validation
-checkpoint or early stopping.
+Training uses KDDTrain+ only, with fixed epochs and no held-out checkpoint
+selection or early stopping. Synthetic rows are not used.
 """
 
 from __future__ import annotations

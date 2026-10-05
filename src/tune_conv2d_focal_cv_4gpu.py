@@ -1,23 +1,13 @@
-"""Tune Conv2D class-balanced focal loss with fixed four-fold OOF validation.
+"""Tune Conv2D focal loss using four-fold KDDTrain+ OOF predictions.
 
-Default experiment
-------------------
-* Model: the fixed 109,381-parameter Conv2D used by ``cnn_opt.py``.
-* Data: KDDTrain+ only. KDDTest+ and synthetic data are never accessed.
-* Grid: beta in {0.99, 0.999, 0.9999} and
-  gamma in {0.25, 0.5, 0.75, 1.0, 1.5, 2.0}.
-* Repetition: training seeds {0, 1, 2} on one frozen four-fold split.
-* Training: 25 fixed epochs, ordinary shuffled batches, raw argmax.
+The default grid combines beta values 0.99, 0.999, and 0.9999 with gamma
+values 0.25, 0.5, 0.75, 1.0, 1.5, and 2.0. Each pair uses seeds 0, 1, and 2
+and 25 epochs with shuffled batches. KDDTest+ and synthetic rows are not used.
 
-All four folds run across the configured CPU/GPU workers. For every
-beta/gamma/seed setting, each fit trains on three folds and predicts the fourth.
-The four predictions are then
-placed back in original row order to form one complete out-of-fold prediction
-vector. Metrics are calculated once on that vector for each seed, followed by
-mean and sample standard deviation across the three seeds.
-
-Each fit runs in a fresh subprocess on CPU or exactly one visible GPU. Completed
-artifacts are validated and reused when the same command is rerun.
+Preprocessing fits on training folds only. Held-out probabilities are joined
+in the original row order before calculating each seed's metrics and the
+mean and sample standard deviation across seeds. Fits run in separate CPU
+or GPU workers. Completed artifacts are checked and reused.
 """
 
 from __future__ import annotations
@@ -1328,7 +1318,7 @@ def main() -> None:
                 runtime,
                 f"{run_name}: exit={completed.returncode}, log={log_path}",
             )
-        except Exception as error:  # Preserve resumability for controller failures.
+        except Exception as error:  # Save failure details so the run can resume.
             runtime = time.perf_counter() - started
             return (
                 "failed",
@@ -1345,7 +1335,7 @@ def main() -> None:
             run_name = str(plan["run_name"])
             try:
                 status, runtime, failure = execute_plan(gpu, fold_id, plan)
-            except Exception as error:  # Catch failures before log creation too.
+            except Exception as error:  # Report failures that occur before the log is created.
                 status = "failed"
                 runtime = 0.0
                 failure = f"{run_name}: controller error={error!r}"

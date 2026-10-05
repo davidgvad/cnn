@@ -1,4 +1,4 @@
-"""Paper metrics and factorial contrasts, calculated directly from class counts."""
+"""Calculate paper metrics and factorial contrasts from class counts."""
 from __future__ import annotations
 
 import csv

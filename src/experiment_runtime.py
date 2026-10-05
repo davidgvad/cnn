@@ -1,8 +1,8 @@
-"""Hardware and path configuration shared by the paper experiment controllers.
+"""CPU/GPU workers and paths for the paper experiments.
 
-Each subprocess fits one complete model. Changing the number of workers changes
-concurrency, not batch size, folds, seeds, loss or optimizer settings. TensorFlow
-device discovery runs in a separate process so the controller never owns a GPU.
+Each worker fits a complete model. Worker count changes concurrency without
+changing batches, folds, seeds, loss, or optimizer settings. Device discovery
+runs separately so the controller does not reserve a GPU.
 """
 from __future__ import annotations
 

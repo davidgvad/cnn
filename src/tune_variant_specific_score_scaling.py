@@ -1,26 +1,13 @@
-"""Select variant-specific score scaling from saved OOF predictions.
+"""Select R2L/U2R score coefficients from saved KDDTrain+ OOF predictions.
 
-This is a post-processing utility: it never trains a neural network.  The
-``select`` phase reads KDDTrain+ out-of-fold probabilities and independently
-selects R2L/U2R score coefficients for each architecture and each of four
-training regimes:
+Select a separate pair for each backbone and training regime: baseline,
+focal loss, minority-guaranteed batches, and focal loss plus batching.
+The evaluate command applies those frozen pairs to saved KDDTest+ scores.
+This script does not train models or use test results for selection.
 
-* ordinary cross-entropy;
-* class-balanced focal loss;
-* cross-entropy with minority-guaranteed batches;
-* class-balanced focal loss with minority-guaranteed batches.
-
-The ``evaluate`` phase reads the frozen selection manifest and applies each
-pair to the corresponding saved KDDTest+ probabilities.  Keeping these phases
-separate makes it explicit that KDDTest+ is not part of coefficient selection.
-
-Run both commands from the repository root::
-
+Run from the repository root:
     python src/tune_variant_specific_score_scaling.py select
     python src/tune_variant_specific_score_scaling.py evaluate
-
-The resulting validation and KDDTest+ CSV files contain the complete 2 x 2 x 2
-factorial comparison of focal loss, minority batching, and score scaling.
 """
 
 from __future__ import annotations
@@ -587,6 +574,7 @@ def select_coefficients(args: argparse.Namespace) -> None:
                 architecture,
                 base_training,
                 seeds,
+                data_dir=Path(args.data_dir).expanduser().resolve() if getattr(args, "data_dir", None) else None,
             )
             source_metadata[architecture][base_training] = metadata
             per_seed, ranking, best = scaling.score_oof_probabilities(
@@ -983,6 +971,7 @@ def evaluate_kddtest(args: argparse.Namespace) -> None:
                         architecture,
                         test_variant,
                         int(seed),
+                        data_dir=Path(args.data_dir).expanduser().resolve() if getattr(args, "data_dir", None) else None,
                     )
                 )
                 labels, probabilities, raw_predictions, _ = (
@@ -1116,6 +1105,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--results-dir",
         default=str(Path(__file__).resolve().parents[1] / "results"),
     )
+    parser.add_argument("--data-dir", type=Path, default=None)
     subparsers = parser.add_subparsers(dest="phase", required=True)
 
     select = subparsers.add_parser(

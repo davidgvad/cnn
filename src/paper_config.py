@@ -1,4 +1,4 @@
-"""Load the checked-in scientific settings without server artifact paths."""
+"""Load the paper settings without server-specific paths."""
 from __future__ import annotations
 
 import json
