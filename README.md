@@ -33,7 +33,7 @@ done
 
 ## 2. Get predictions for the other training settings
 
-Load each backbone's chosen focal parameters, then train baseline, batching only, and focal + batching. The shared runner supports all four backbones.
+Load each backbone's chosen focal parameters, then train baseline, batching only, and focal + batching (focal only is already trained from part 1). The shared runner supports all four backbones.
 
 ```bash
 for backbone in conv2d conv1d transformer mlp; do
