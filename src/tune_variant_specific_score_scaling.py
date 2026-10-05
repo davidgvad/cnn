@@ -129,8 +129,7 @@ def resolve_recorded_path(
 ) -> Path:
     """Resolve an absolute or repository-relative path stored in JSON."""
     path = Path(raw_path).expanduser()
-    # OOF pointers name siblings of the recording JSON. Prefer the current
-    # artifact tree when results have been moved to a reviewer's machine.
+    # Prefer the current artifact directory when results have been moved.
     candidates = []
     if recording_path is not None and path.is_absolute():
         candidates.append(recording_path.parent / path.name)
@@ -917,11 +916,23 @@ def load_test_run_metadata(
     return run_path.resolve(), run, cache_metadata_path.resolve(), cache_metadata
 
 
-def verify_oof_lineage(manifest: Mapping[str, Any]) -> None:
+def verify_oof_lineage(
+    manifest: Mapping[str, Any], *, manifest_path: Path | None = None,
+    repo_root: Path | None = None,
+) -> None:
     for architecture, by_training in manifest["source_metadata"].items():
         for base_training, metadata in by_training.items():
             for seed, source in metadata["oof_files"].items():
                 path = Path(source["path"])
+                if manifest_path is not None:
+                    recorded_dir = Path(metadata["oof_directory"])
+                    relocated_dir = resolve_recorded_path(
+                        recorded_dir, repo_root or manifest_path.parent, manifest_path
+                    )
+                    path = resolve_recorded_path(
+                        source["path"], repo_root or manifest_path.parent,
+                        relocated_dir / "record.json",
+                    )
                 if not path.is_file():
                     raise FileNotFoundError(
                         f"Selected OOF source disappeared: {architecture}/"
@@ -931,13 +942,143 @@ def verify_oof_lineage(manifest: Mapping[str, Any]) -> None:
                     raise ValueError(f"Selected OOF source changed: {path}")
 
 
+def validate_selection_lineage(
+    manifest_path: Path, manifest: Mapping[str, Any], repo_root: Path,
+    data_dir: Path | None = None, *, verify_arrays: bool = True,
+) -> Dict[str, Dict[str, Any]]:
+    """Read frozen parameters from the OOF records that produced the selection."""
+    architectures = list(manifest["architectures"])
+    seeds = list(manifest["seeds"])
+    if not architectures or len(architectures) != len(set(architectures)) or not set(architectures) <= set(ARCHITECTURES):
+        raise ValueError("Invalid architectures in the selection manifest.")
+    if not seeds or len(seeds) != len(set(seeds)) or any(type(s) is not int or s < 0 for s in seeds):
+        raise ValueError("Invalid training seeds in the selection manifest.")
+    if manifest.get("kddtest_accessed") is not False:
+        raise ValueError("The parameter selection must exclude KDDTest+.")
+    if len(manifest["base_training_regimes"]) != 4 or set(manifest["base_training_regimes"]) != set(BASE_TRAINING_ORDER):
+        raise ValueError("The selection must contain all four training regimes.")
+    grid = [float(value) for value in manifest["coefficient_values"]]
+    if not grid or len(grid) != len(set(grid)) or 1.0 not in grid or any(not np.isfinite(value) or value <= 0 for value in grid):
+        raise ValueError("Invalid recorded coefficient grid.")
+    rows = manifest["selected_coefficients"]
+    keys = [(row["architecture"], row["base_training"]) for row in rows]
+    expected = {(arch, regime) for arch in architectures for regime in BASE_TRAINING_ORDER}
+    if len(keys) != len(expected) or set(keys) != expected:
+        raise ValueError("Missing or duplicate selected coefficient rows.")
+    coefficients = {}
+    for row in rows:
+        pair = tuple(float(row[key]) for key in ("r2l_score_coefficient", "u2r_score_coefficient"))
+        if any(not np.isfinite(value) or value <= 0 or value not in grid for value in pair):
+            raise ValueError("Score coefficients must belong to the positive recorded grid.")
+        coefficients[(row["architecture"], row["base_training"])] = pair
+    train_hash = core.sha256_file((data_dir or repo_root / "data") / "KDDTrain+.txt")
+    chosen = {}
+    for architecture in architectures:
+        sources = manifest["source_metadata"][architecture]
+        if set(sources) != set(BASE_TRAINING_ORDER):
+            raise ValueError(f"Incomplete OOF sources: {architecture}")
+        protocols = {}
+        for regime in BASE_TRAINING_ORDER:
+            metadata = sources[regime]
+            protocol_path = resolve_recorded_path(metadata["protocol"], repo_root, manifest_path)
+            if core.sha256_file(protocol_path) != metadata["protocol_sha256"]:
+                raise ValueError(f"Selected protocol changed: {protocol_path}")
+            protocol = core.read_json(protocol_path)
+            if protocol.get("kddtest_accessed") is not False:
+                raise ValueError(f"Selected protocol accessed KDDTest+: {protocol_path}")
+            if protocol.get("kddtrain_sha256") != train_hash or metadata.get("kddtrain_sha256") != train_hash:
+                raise ValueError(f"Selected training-data hash differs: {protocol_path}")
+            if set(metadata["oof_files"]) != {str(seed) for seed in seeds}:
+                raise ValueError(f"Incomplete OOF seed coverage: {architecture}/{regime}")
+            if regime == "focal_only":
+                settings = protocol["settings"]
+                if settings.get("model") != ARCHITECTURE_LABELS[architecture] or settings.get("batching") != "ordinary_shuffled":
+                    raise ValueError(f"Wrong focal-only model or batching: {architecture}")
+            else:
+                validate_simple_training_protocol(
+                    protocol, protocol_path, Path(metadata["latest_pointer"]), architecture, regime
+                )
+                settings = protocol["training_settings"]
+            if settings.get("training_seeds") != seeds or settings.get("fold_count") != 4:
+                raise ValueError(f"Training seeds or folds differ: {architecture}/{regime}")
+            expected_batching = "minority_guaranteed_with_replacement" if BASE_TRAINING[regime]["batching"] else "ordinary_shuffled"
+            if settings.get("batching") != expected_batching:
+                raise ValueError(f"OOF batching differs: {architecture}/{regime}")
+            if settings.get("validation_used_during_training") is not False or settings.get("ctgan") is not False:
+                raise ValueError(f"Unexpected validation or synthetic training: {architecture}/{regime}")
+            protocols[regime] = settings
+        focal = protocols["focal_only"]
+        if type(focal.get("fold_seed")) is not int or focal["fold_seed"] < 0:
+            raise ValueError(f"Invalid selected fold seed: {architecture}")
+        best_metadata = sources["focal_only"]
+        best_path = resolve_recorded_path(best_metadata["best_config"], repo_root, manifest_path)
+        if core.sha256_file(best_path) != best_metadata["best_config_sha256"]:
+            raise ValueError(f"Selected focal winner changed: {best_path}")
+        best = core.read_json(best_path)
+        if best.get("kddtest_accessed") is not False or best.get("config_id") != best_metadata["config_id"]:
+            raise ValueError(f"Invalid selected focal winner: {best_path}")
+        if best.get("training_seeds") != seeds or best.get("fold_count") != 4:
+            raise ValueError(f"Focal winner seeds or folds differ: {best_path}")
+        beta, gamma = float(best["beta"]), float(best["focal_gamma"])
+        if not np.isfinite(beta) or not 0 < beta < 1 or not np.isfinite(gamma) or gamma <= 0:
+            raise ValueError(f"Invalid selected focal parameters: {best_path}")
+        if beta not in focal["betas"] or gamma not in focal["focal_gammas"]:
+            raise ValueError(f"Focal winner is outside its recorded search: {best_path}")
+        for regime, settings in protocols.items():
+            for key in ("epochs", "batch_size", "fold_seed", "deterministic_ops", "backbone"):
+                if settings.get(key) != focal.get(key):
+                    raise ValueError(f"OOF pipeline differs: {architecture}/{regime}/{key}")
+        full = protocols["focal_batch"]
+        if full.get("cb_beta") != beta or full.get("focal_gamma") != gamma:
+            raise ValueError(f"Focal-plus-batching parameters differ from the focal winner: {architecture}")
+        quota = full["minority_per_batch"]
+        if type(quota) is not int or quota < 1 or protocols["batch_only"].get("minority_per_batch") != quota:
+            raise ValueError(f"Minority batch quotas differ: {architecture}")
+        for key in ("epochs", "batch_size"):
+            if type(focal[key]) is not int or focal[key] < 1:
+                raise ValueError(f"Invalid selected training setting: {architecture}/{key}")
+        pair = coefficients[(architecture, "focal_batch")]
+        chosen[architecture] = {
+            "beta": beta, "focal_gamma": gamma, "backbone": focal["backbone"],
+            "epochs": focal["epochs"], "batch_size": focal["batch_size"],
+            "minority_per_batch": quota,
+            "deterministic_ops": bool(focal.get("deterministic_ops", False)),
+            "r2l_score_coefficient": pair[0], "u2r_score_coefficient": pair[1],
+        }
+    if verify_arrays:
+        verify_oof_lineage(manifest, manifest_path=manifest_path, repo_root=repo_root)
+    return chosen
+
+
+def validate_final_training(
+    run: Mapping[str, Any], chosen: Mapping[str, Any], base_training: str,
+) -> None:
+    expected = {
+        "epochs_requested": chosen["epochs"], "batch_size": chosen["batch_size"],
+        "epochs_completed": chosen["epochs"], "backbone": chosen["backbone"],
+        "model_parameters": chosen["backbone"]["expected_parameters"],
+        "batching": "minority_guaranteed_with_replacement" if BASE_TRAINING[base_training]["batching"] else "ordinary_shuffled",
+        "minority_per_batch_per_class": chosen["minority_per_batch"] if BASE_TRAINING[base_training]["batching"] else 0,
+        "validation_used_during_training": False, "ctgan_used": False,
+        "deterministic_ops_requested": chosen["deterministic_ops"],
+    }
+    if BASE_TRAINING[base_training]["focal"]:
+        expected.update(cb_beta=chosen["beta"], focal_gamma=chosen["focal_gamma"])
+    mismatches = {key: (run.get(key), value) for key, value in expected.items() if run.get(key) != value}
+    if mismatches:
+        raise ValueError(f"Final training differs from its OOF selection: {mismatches}")
+
+
 def evaluate_kddtest(args: argparse.Namespace) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     results_dir = Path(args.results_dir).expanduser().resolve()
     manifest_path, manifest = load_selection_manifest(
         args.selection, repo_root, results_dir
     )
-    verify_oof_lineage(manifest)
+    chosen = validate_selection_lineage(
+        manifest_path, manifest, repo_root,
+        Path(args.data_dir).expanduser().resolve() if getattr(args, "data_dir", None) else None,
+    )
     architectures = tuple(manifest["architectures"])
     seeds = tuple(int(seed) for seed in manifest["seeds"])
     selected_lookup = {
@@ -974,6 +1115,7 @@ def evaluate_kddtest(args: argparse.Namespace) -> None:
                         data_dir=Path(args.data_dir).expanduser().resolve() if getattr(args, "data_dir", None) else None,
                     )
                 )
+                validate_final_training(run, chosen[architecture], base_training)
                 labels, probabilities, raw_predictions, _ = (
                     read_probability_artifact(path, require_oof_fields=False)
                 )

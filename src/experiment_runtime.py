@@ -1,11 +1,10 @@
-"""CPU/GPU workers and paths for the paper experiments.
+"""GPU workers and paths for the paper experiments.
 
 Each worker fits a complete model. Worker count changes concurrency without
 changing batches, folds, seeds, loss, or optimizer settings. Device discovery
-runs separately so the controller does not reserve a GPU.
+runs separately so the controller does not reserve a GPU
 """
 from __future__ import annotations
-
 import argparse
 from dataclasses import dataclass
 import json
@@ -30,14 +29,12 @@ class Runtime:
 
 
 def add_arguments(parser: argparse.ArgumentParser, *, paths=True):
-    parser.add_argument("--device", choices=("auto", "cpu", "gpu"), default="auto",
-                        help="Automatically use visible GPUs, or explicitly choose CPU/GPU.")
+    parser.add_argument("--device", choices=("gpu",), default="gpu",
+                        help="Model training requires a TensorFlow-visible GPU.")
     parser.add_argument("--gpus", "--gpu-ids", nargs="+", default=None,
                         help="Logical GPU IDs within CUDA_VISIBLE_DEVICES; defaults to all visible GPUs.")
     parser.add_argument("--workers", type=int, default=None,
-                        help="Maximum independent fits at once; CPU default is one.")
-    parser.add_argument("--allow-cpu", action="store_true",
-                        help="Compatibility alias for --device cpu.")
+                        help="Maximum independent fits at once, up to the selected GPU count.")
     if paths:
         parser.add_argument("--data-dir", type=Path, default=None)
         parser.add_argument("--results-dir", type=Path, default=None)
@@ -77,24 +74,13 @@ def select_runtime(args, *, gpu_count=None) -> Runtime:
     """Explicit GPU dry runs can be planned on a machine with no GPUs."""
     if args.workers is not None and args.workers < 1:
         raise ValueError("--workers must be positive.")
+    if args.device != "gpu":
+        raise ValueError("Model training only supports GPU execution.")
     requested = parse_gpu_ids(args.gpus)
-    device = args.device
-    if args.allow_cpu:
-        if device == "gpu":
-            raise ValueError("--allow-cpu conflicts with --device gpu.")
-        device = "cpu"
-    if device == "cpu":
-        if requested:
-            raise ValueError("--gpus cannot be combined with CPU execution.")
-        workers = tuple(f"cpu{i}" for i in range(args.workers or 1))
-        return Runtime("cpu", workers, {w: "" for w in workers}, False)
     dry_explicit = bool(getattr(args, "dry_run", False) and requested)
     count = gpu_count if gpu_count is not None else (None if dry_explicit else visible_gpu_count())
-    if not requested and count == 0:
-        if device == "gpu":
-            raise ValueError("No TensorFlow GPU is visible. Choose --device cpu or check CUDA_VISIBLE_DEVICES.")
-        workers = tuple(f"cpu{i}" for i in range(args.workers or 1))
-        return Runtime("cpu", workers, {w: "" for w in workers}, True)
+    if count == 0:
+        raise ValueError("No TensorFlow GPU is visible. Allocate a GPU and check CUDA_VISIBLE_DEVICES and the CUDA installation.")
     gpus = requested or [str(i) for i in range(count or 0)]
     if count is not None:
         allocated = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
@@ -119,14 +105,12 @@ def configure_controller(args, parser):
         runtime = select_runtime(args)
     except (ValueError, RuntimeError) as error:
         parser.error(str(error))
-    args.allow_cpu = runtime.device == "cpu"
     return runtime
 
 
-def validate_worker_devices(visible_gpus, *, allow_cpu: bool):
-    expected = 0 if allow_cpu else 1
-    if len(visible_gpus) != expected:
-        raise RuntimeError(f"This worker expects {expected} visible GPUs; TensorFlow sees {len(visible_gpus)}: {visible_gpus}.")
+def validate_worker_devices(visible_gpus):
+    if len(visible_gpus) != 1:
+        raise RuntimeError(f"Each training worker requires exactly one visible GPU; TensorFlow sees {len(visible_gpus)}: {visible_gpus}.")
 
 
 def data_directory(args, repo_root: Path) -> Path:

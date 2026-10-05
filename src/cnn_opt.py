@@ -1,8 +1,6 @@
-"""Conv2D model and minority-guaranteed batches."""
+"""Conv2D model and minority-guaranteed batches"""
 from __future__ import annotations
-
 from typing import List, Tuple
-
 import numpy as np
 import tensorflow as tf
 

@@ -6,7 +6,7 @@ tuning, checkpoints, or model selection.
 
 The supported variants use cross-entropy or focal loss, ordinary or
 minority-guaranteed batches, and raw or scaled class scores. Independent fits
-run on the configured CPU or GPU workers.
+run on the configured GPU workers.
 """
 
 from __future__ import annotations
@@ -30,28 +30,26 @@ import pandas as pd
 
 import run_no_ctgan_model_ablation_4gpu as core
 import experiment_runtime as runtime
-from paper_config import DEFAULT_CONFIG, load_config
+import tune_variant_specific_score_scaling as selection
 
 
 SCHEMA_VERSION = 1
 DEFAULT_ARCHITECTURES = ["conv2d", "conv1d", "transformer", "mlp"]
 DEFAULT_SEEDS = [0, 1, 2]
-DEFAULT_VARIANTS = ["baseline", "full"]
+DEFAULT_VARIANTS = ["baseline", "focal_only", "batch_only", "full"]
 SUPPORTED_VARIANTS = [
     "baseline",
     "focal_only",
     "batch_only",
-    "scaling_only",
     "full",
 ]
 FOCAL_VARIANTS = {"focal_only", "full"}
 MINORITY_BATCH_VARIANTS = {"batch_only", "full"}
-SCORE_SCALING_VARIANTS = {"scaling_only", "full"}
+SCORE_SCALING_VARIANTS = {"full"}
 VARIANT_LABELS = {
     "baseline": "Baseline",
     "focal_only": "Baseline + focal loss",
     "batch_only": "Baseline + minority batching",
-    "scaling_only": "Baseline + frozen scaling",
     "full": "Focal + batching + scaling",
 }
 METRICS = list(core.METRICS)
@@ -115,17 +113,40 @@ def stable_hash(value: Any, length: int = 12) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
 
 
-def frozen_settings(paper: Dict[str, Any], architecture: str, variant: str = "full") -> Dict[str, Any]:
-    chosen = paper["architectures"][architecture]
-    regime = "baseline" if variant == "scaling_only" else "focal_batch"
-    pair = chosen["score_scaling"][regime]
-    return {
-        **FROZEN_CONFIG[architecture],
-        "beta": chosen["focal_beta"],
-        "focal_gamma": chosen["focal_gamma"],
-        "r2l_score_coefficient": pair["r2l"],
-        "u2r_score_coefficient": pair["u2r"],
-    }
+def load_frozen_selection(args: argparse.Namespace, repo_root: Path):
+    results_dir = runtime.results_directory(args, repo_root)
+    manifest_path, manifest = selection.load_selection_manifest(args.selection, repo_root, results_dir)
+    if set(manifest["architectures"]) != set(DEFAULT_ARCHITECTURES):
+        raise ValueError("Final evaluation requires all four architectures in the OOF selection.")
+    chosen = selection.validate_selection_lineage(
+        manifest_path, manifest, repo_root, runtime.data_directory(args, repo_root)
+    )
+    if list(args.seeds) != manifest["seeds"]:
+        raise ValueError("Final training seeds must match the OOF selection.")
+    frozen = {}
+    for architecture in args.architectures:
+        settings = chosen[architecture]
+        for key in ("epochs", "batch_size", "minority_per_batch", "deterministic_ops"):
+            if getattr(args, key) != settings[key]:
+                raise ValueError(f"Final {key} differs from the OOF selection: {architecture}")
+        if settings["backbone"] != FROZEN_CONFIG[architecture]["backbone"]:
+            raise ValueError(f"Selected backbone differs from the final model: {architecture}")
+        frozen[architecture] = {**FROZEN_CONFIG[architecture], **settings}
+    return manifest_path, manifest, frozen
+
+
+def load_worker_settings(args: argparse.Namespace) -> Dict[str, Any]:
+    protocol_path = Path(args.worker_protocol_path)
+    if core.sha256_file(protocol_path) != args.worker_protocol_sha256:
+        raise ValueError("The frozen final protocol changed before the worker started.")
+    protocol = core.read_json(protocol_path)
+    if protocol["experiment_key"] != args.experiment_key:
+        raise ValueError("The frozen final protocol belongs to a different experiment.")
+    frozen = protocol["frozen_config"][args.worker_architecture]
+    for key in ("epochs", "batch_size", "minority_per_batch", "deterministic_ops"):
+        if getattr(args, key) != frozen[key]:
+            raise ValueError(f"Worker {key} differs from the frozen protocol.")
+    return frozen
 
 
 def progress_bar(completed: int, total: int, width: int = 30) -> str:
@@ -135,26 +156,6 @@ def progress_bar(completed: int, total: int, width: int = 30) -> str:
     filled = int(width * completed / total)
     bar = "#" * filled + "-" * (width - filled)
     return f"[{bar}] {100.0 * completed / total:6.2f}% ({completed}/{total})"
-
-
-def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
-    """Resolve logical GPU indexes inside a scheduler-provided allocation."""
-    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
-    tokens = [token.strip() for token in visible.split(",") if token.strip()]
-    try:
-        logical = [int(gpu) for gpu in gpus]
-    except ValueError:
-        logical = []
-    if (
-        tokens
-        and len(logical) == len(gpus)
-        and all(0 <= index < len(tokens) for index in logical)
-    ):
-        return {
-            gpu: tokens[index]
-            for gpu, index in zip(gpus, logical, strict=True)
-        }
-    return {gpu: gpu for gpu in gpus}
 
 
 def reshape_features(X: np.ndarray, architecture: str) -> np.ndarray:
@@ -295,7 +296,7 @@ def run_worker(args: argparse.Namespace) -> None:
     from cnn_opt import BalancedBatchSequence  # type: ignore
 
     visible_gpus = tf.config.list_physical_devices("GPU")
-    runtime.validate_worker_devices(visible_gpus, allow_cpu=args.allow_cpu)
+    runtime.validate_worker_devices(visible_gpus)
     for device in visible_gpus:
         try:
             tf.config.experimental.set_memory_growth(device, True)
@@ -328,7 +329,7 @@ def run_worker(args: argparse.Namespace) -> None:
     architecture = str(args.worker_architecture)
     variant = str(args.worker_variant)
     seed = int(args.worker_seed)
-    frozen = frozen_settings(load_config(args.paper_config), architecture, variant)
+    frozen = load_worker_settings(args)
     tf.keras.utils.set_random_seed(seed)
     np.random.seed(seed)
 
@@ -490,7 +491,7 @@ def run_worker(args: argparse.Namespace) -> None:
         "assigned_gpu": os.environ.get("EXPERIMENT_GPU_ID", ""),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "tensorflow_visible_gpu_count": len(visible_gpus),
-        "runtime_device": "cpu" if args.allow_cpu else "gpu",
+        "runtime_device": "gpu",
         "deterministic_ops_requested": bool(args.deterministic_ops),
         "deterministic_ops_enabled": deterministic_enabled,
         "tensorflow_version": core.package_version("tensorflow"),
@@ -573,9 +574,10 @@ def build_worker_command(
         "--fit-verbose",
         str(args.fit_verbose),
     ]
-    if args.allow_cpu:
-        command.append("--allow-cpu")
-    command += ["--paper-config", str(args.paper_config)]
+    command += [
+        "--worker-protocol-path", str(plan["protocol_path"]),
+        "--worker-protocol-sha256", args.protocol_sha256,
+    ]
     if args.deterministic_ops:
         command.append("--deterministic-ops")
     return command
@@ -754,7 +756,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--minority-per-batch", type=int, default=1)
     parser.add_argument("--fit-verbose", type=int, choices=[0, 1, 2], default=2)
-    parser.add_argument("--paper-config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--selection", help="OOF score-selection manifest or latest pointer, defaulting to the current results directory.")
     parser.add_argument("--deterministic-ops", action="store_true")
     parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -770,22 +772,17 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--worker-cache-metadata-path", help=argparse.SUPPRESS)
     parser.add_argument("--worker-result-path", help=argparse.SUPPRESS)
     parser.add_argument("--worker-prediction-path", help=argparse.SUPPRESS)
+    parser.add_argument("--worker-protocol-path", help=argparse.SUPPRESS)
+    parser.add_argument("--worker-protocol-sha256", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    paper = load_config(args.paper_config)
-    if paper.get("parameter_selection_source", {}).get("parameters_fixed") is not True:
-        parser.error("Freeze both focal and score-scaling choices before final evaluation.")
-    for name in args.architectures:
-        settings = paper["architectures"][name]
-        if settings["parameters"] != FROZEN_CONFIG[name]["backbone"]["expected_parameters"]:
-            parser.error(f"The configured parameter count differs from the fixed backbone: {name}")
     if args.epochs <= 0:
         parser.error("--epochs must be positive.")
     if args.batch_size <= 0:
         parser.error("--batch-size must be positive.")
     if args.minority_per_batch <= 0:
         parser.error("--minority-per-batch must be positive.")
-    if not args.seeds:
-        parser.error("At least one seed is required.")
+    if not args.seeds or len(args.seeds) != len(set(args.seeds)) or any(seed < 0 for seed in args.seeds):
+        parser.error("Training seeds must be unique nonnegative integers.")
     return args
 
 
@@ -802,16 +799,17 @@ def main() -> None:
             args.worker_cache_metadata_path,
             args.worker_result_path,
             args.worker_prediction_path,
+            args.worker_protocol_path,
+            args.worker_protocol_sha256,
         ]
         if any(value is None or value == "" for value in required_worker_values):
             raise ValueError("A required internal worker argument is missing.")
         run_worker(args)
         return
 
-    paper = load_config(args.paper_config)
     repo_root = Path(__file__).resolve().parents[1]
     results_dir = runtime.results_directory(args, repo_root)
-    results_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path, manifest, frozen = load_frozen_selection(args, repo_root)
     architectures = list(dict.fromkeys(args.architectures))
     variants = list(dict.fromkeys(args.variants))
     seeds = list(dict.fromkeys(int(seed) for seed in args.seeds))
@@ -819,7 +817,6 @@ def main() -> None:
         runtime_config = runtime.select_runtime(args)
     except (ValueError, RuntimeError) as error:
         raise SystemExit(str(error)) from error
-    args.allow_cpu = runtime_config.device == "cpu"
     gpus = list(runtime_config.workers)
 
     protocol = {
@@ -831,8 +828,10 @@ def main() -> None:
         "epochs": int(args.epochs),
         "batch_size": int(args.batch_size),
         "minority_per_batch_per_class": int(args.minority_per_batch),
-        "frozen_config": {name: frozen_settings(paper, name) for name in architectures},
-        "paper_config_sha256": core.sha256_file(args.paper_config),
+        "frozen_config": frozen,
+        "selection_id": manifest["selection_id"],
+        "selection_manifest": str(manifest_path),
+        "selection_manifest_sha256": core.sha256_file(manifest_path),
         "training_partition": "all KDDTrain+",
         "evaluation_partition": "untouched KDDTest+",
         "preprocessing_fit": "all KDDTrain+ only",
@@ -845,17 +844,12 @@ def main() -> None:
     required_sources += [repo_root / "src" / n for n in (
         "run_final_baseline_vs_full_kddtest_4gpu.py", "experiment_runtime.py",
         "run_no_ctgan_model_ablation_4gpu.py", "cnn_opt.py", "cnn_opt_1d_4gpu.py", "cnn_gan_foc.py")]
-    required_sources += [args.paper_config, repo_root / "src/paper_config.py"]
+    required_sources += [manifest_path, repo_root / "src/tune_variant_specific_score_scaling.py"]
     protocol["source_and_data_fingerprint"] = core.fingerprint_files(required_sources)
     experiment_key = stable_hash(protocol)
     protocol["runtime"] = runtime_config.metadata()
     protocol["experiment_key"] = experiment_key
-    if variants == DEFAULT_VARIANTS:
-        output_stem = "final_baseline_vs_full_kddtest"
-    elif variants == ["focal_only", "batch_only", "scaling_only"]:
-        output_stem = "final_single_enhancement_kddtest"
-    else:
-        output_stem = "final_neural_variants_kddtest"
+    output_stem = "final_neural_variants_kddtest"
     prefix = f"{output_stem}_{experiment_key}"
     protocol_path = results_dir / f"{prefix}_protocol.json"
     plan_path = results_dir / f"{prefix}_plan.csv"
@@ -884,6 +878,7 @@ def main() -> None:
                         "cache_metadata_path": str(cache_metadata_path),
                         "result_path": str(run_dir / f"{run_name}.json"),
                         "prediction_path": str(prediction_dir / f"{run_name}.npz"),
+                        "protocol_path": str(protocol_path),
                         "log_path": str(log_dir / f"{run_name}.log"),
                     }
                 )
@@ -925,6 +920,7 @@ def main() -> None:
     for directory in (run_dir, log_dir, prediction_dir):
         directory.mkdir(parents=True, exist_ok=True)
     core.atomic_json(protocol_path, protocol)
+    args.protocol_sha256 = core.sha256_file(protocol_path)
     prepare_train_test_cache(
         repo_root,
         cache_path,

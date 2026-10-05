@@ -156,21 +156,6 @@ def progress_bar(completed: int, total: int, width: int = 30) -> str:
     return f"[{bar}] {100.0 * completed / total:6.2f}% ({completed}/{total})"
 
 
-def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
-    """Map logical worker IDs to tokens in a parent CUDA allocation."""
-    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
-    tokens = [token.strip() for token in visible.split(",") if token.strip()]
-    try:
-        logical = [int(gpu) for gpu in gpus]
-    except ValueError:
-        logical = []
-    if (
-        tokens
-        and len(logical) == len(gpus)
-        and all(0 <= index < len(tokens) for index in logical)
-    ):
-        return {gpu: tokens[index] for gpu, index in zip(gpus, logical, strict=True)}
-    return {gpu: gpu for gpu in gpus}
 
 
 def worker_result_is_complete(
@@ -269,7 +254,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
 
     visible_gpus = tf.config.list_physical_devices("GPU")
-    runtime.validate_worker_devices(visible_gpus, allow_cpu=args.allow_cpu)
+    runtime.validate_worker_devices(visible_gpus)
     for device in visible_gpus:
         try:
             tf.config.experimental.set_memory_growth(device, True)
@@ -478,7 +463,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "assigned_gpu": os.environ.get("EXPERIMENT_GPU_ID", ""),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "tensorflow_visible_gpu_count": len(visible_gpus),
-        "runtime_device": "cpu" if args.allow_cpu else "gpu",
+        "runtime_device": "gpu",
         "deterministic_ops_requested": bool(args.deterministic_ops),
         "deterministic_ops_enabled": deterministic_enabled,
         "tensorflow_version": core.package_version("tensorflow"),
@@ -547,8 +532,6 @@ def build_worker_command(
         command.extend(
             ["--minority-per-batch", str(args.minority_per_batch)]
         )
-    if args.allow_cpu:
-        command.append("--allow-cpu")
     if args.deterministic_ops:
         command.append("--deterministic-ops")
     return command

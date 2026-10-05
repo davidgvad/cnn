@@ -1,6 +1,5 @@
-"""Conv1D, MLP, and feature-token Transformer models."""
+"""Conv1D, MLP, and feature-token Transformer models"""
 from __future__ import annotations
-
 import tensorflow as tf
 
 

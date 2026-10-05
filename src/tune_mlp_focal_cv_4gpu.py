@@ -6,8 +6,7 @@ and 25 epochs with shuffled batches. KDDTest+ and synthetic rows are not used.
 
 Preprocessing fits on training folds only. Held-out probabilities are joined
 in the original row order before calculating each seed's metrics and the
-mean and sample standard deviation across seeds. Fits run in separate CPU
-or GPU workers. Completed artifacts are checked and reused.
+mean and sample standard deviation across seeds. Fits run in separate GPU workers. Completed artifacts are checked and reused.
 """
 
 from __future__ import annotations
@@ -71,25 +70,6 @@ def progress_bar(completed: int, total: int, width: int = 30) -> str:
     return f"[{bar}] {percentage:6.2f}% ({completed}/{total})"
 
 
-def resolve_cuda_tokens(gpus: Sequence[str]) -> Dict[str, str]:
-    """Map logical worker IDs onto Slurm's allocated CUDA device tokens."""
-    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
-    allocated_tokens = [token.strip() for token in visible.split(",") if token.strip()]
-    logical_indices: List[int] = []
-    try:
-        logical_indices = [int(gpu) for gpu in gpus]
-    except ValueError:
-        pass
-    if (
-        allocated_tokens
-        and len(logical_indices) == len(gpus)
-        and all(0 <= index < len(allocated_tokens) for index in logical_indices)
-    ):
-        return {
-            gpu: allocated_tokens[index]
-            for gpu, index in zip(gpus, logical_indices, strict=True)
-        }
-    return {gpu: gpu for gpu in gpus}
 
 
 def configurations(
@@ -365,7 +345,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
 
     visible_gpus = tf.config.list_physical_devices("GPU")
-    runtime.validate_worker_devices(visible_gpus, allow_cpu=args.allow_cpu)
+    runtime.validate_worker_devices(visible_gpus)
     for device in visible_gpus:
         try:
             tf.config.experimental.set_memory_growth(device, True)
@@ -493,7 +473,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "assigned_gpu": os.environ.get("EXPERIMENT_GPU_ID", ""),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "tensorflow_visible_gpu_count": len(visible_gpus),
-        "runtime_device": "cpu" if args.allow_cpu else "gpu",
+        "runtime_device": "gpu",
         "deterministic_ops_requested": bool(args.deterministic_ops),
         "deterministic_ops_enabled": deterministic_enabled,
         "tensorflow_version": core.package_version("tensorflow"),
@@ -645,8 +625,6 @@ def build_worker_command(
         "--fit-verbose",
         str(args.fit_verbose),
     ]
-    if args.allow_cpu:
-        command.append("--allow-cpu")
     if args.deterministic_ops:
         command.append("--deterministic-ops")
     return command

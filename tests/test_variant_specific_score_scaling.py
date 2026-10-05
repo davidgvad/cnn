@@ -1,19 +1,16 @@
 from __future__ import annotations
-
 import json
 import argparse
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-
 import numpy as np
 import pandas as pd
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
-
 import run_no_ctgan_model_ablation_4gpu as core  # noqa: E402
 import tune_variant_specific_score_scaling as subject  # noqa: E402
 
@@ -265,6 +262,7 @@ class VariantSpecificScoreScalingTests(unittest.TestCase):
             labels = np.tile(np.arange(5, dtype=np.int64), 4)
             probabilities = np.full((len(labels), 5), 0.04, dtype=np.float64)
             probabilities[np.arange(len(labels)), labels] = 0.84
+            train_hash = core.sha256_file(REPO_ROOT / "data" / "KDDTrain+.txt")
 
             for architecture in subject.ARCHITECTURES:
                 for base_training in subject.BASE_TRAINING_ORDER:
@@ -281,27 +279,45 @@ class VariantSpecificScoreScalingTests(unittest.TestCase):
                         "protocol": str(protocol_path),
                         "oof_directory": str(oof_dir),
                     }
+                    training = {
+                        "model": subject.ARCHITECTURE_LABELS[architecture],
+                        "backbone": subject.scaling.ARCHITECTURE_DEFAULTS[architecture]["stage1"].FIXED_BACKBONE,
+                        "training_seeds": list(subject.SEEDS), "fold_count": 4,
+                        "fold_seed": 0, "epochs": 25, "batch_size": 256,
+                        "deterministic_ops": False, "validation_used_during_training": False,
+                        "ctgan": False,
+                        "batching": "minority_guaranteed_with_replacement" if settings["batching"] else "ordinary_shuffled",
+                    }
                     if base_training == "focal_only":
                         protocol = {
                             "kddtest_accessed": False,
+                            "kddtrain_sha256": train_hash,
                             "settings": {
-                                "model": subject.ARCHITECTURE_LABELS[architecture],
-                                "batching": "ordinary_shuffled",
+                                **training, "betas": [0.99], "focal_gammas": [0.5],
                             },
                         }
                         best_path = results_dir / (
                             f"{architecture}_{base_training}_best.json"
                         )
-                        core.atomic_json(best_path, {"config_id": "selected"})
+                        core.atomic_json(best_path, {
+                            "config_id": "selected", "beta": 0.99, "focal_gamma": 0.5,
+                            "training_seeds": list(subject.SEEDS), "fold_count": 4,
+                            "kddtest_accessed": False,
+                        })
                         pointer["best_config"] = str(best_path)
                     else:
                         protocol = {
                             "kddtest_accessed": False,
+                            "kddtrain_sha256": train_hash,
                             "training_settings": {
+                                **training,
                                 "architecture": architecture,
                                 "training_mode": subject.SHARED_TRAINING_MODE[
                                     base_training
                                 ],
+                                "cb_beta": 0.99 if settings["focal"] else None,
+                                "focal_gamma": 0.5 if settings["focal"] else None,
+                                "minority_per_batch": 1 if settings["batching"] else 0,
                             },
                         }
                     core.atomic_json(protocol_path, protocol)
@@ -374,6 +390,16 @@ class VariantSpecificScoreScalingTests(unittest.TestCase):
                                     prediction_path
                                 ),
                                 "feature_cache_sha256": cache_hash,
+                                "epochs_requested": 25, "batch_size": 256,
+                                "epochs_completed": 25,
+                                "backbone": subject.scaling.ARCHITECTURE_DEFAULTS[architecture]["stage1"].FIXED_BACKBONE,
+                                "model_parameters": subject.scaling.ARCHITECTURE_DEFAULTS[architecture]["stage1"].FIXED_BACKBONE["expected_parameters"],
+                                "batching": "minority_guaranteed_with_replacement" if subject.BASE_TRAINING[base_training]["batching"] else "ordinary_shuffled",
+                                "minority_per_batch_per_class": 1 if subject.BASE_TRAINING[base_training]["batching"] else 0,
+                                "cb_beta": 0.99 if subject.BASE_TRAINING[base_training]["focal"] else None,
+                                "focal_gamma": 0.5 if subject.BASE_TRAINING[base_training]["focal"] else None,
+                                "validation_used_during_training": False,
+                                "ctgan_used": False, "deterministic_ops_requested": False,
                             },
                         )
 
@@ -389,6 +415,14 @@ class VariantSpecificScoreScalingTests(unittest.TestCase):
             self.assertEqual(len(summary), 32)
             self.assertEqual(len(table), 8)
             self.assertTrue((summary["runs"] == 3).all())
+            import export_paper_tables
+            output = results_dir.parent / "tables"
+            export_paper_tables.analyze(results_dir, output, REPO_ROOT / "data")
+            self.assertEqual(len(list(output.glob("table_*.csv"))), 9)
+            focal = pd.read_csv(output / "table_03_focal_parameters.csv")
+            self.assertTrue((focal["Beta"] == 0.99).all())
+            self.assertTrue((focal["Gamma"] == 0.5).all())
+            self.assertEqual(len(pd.read_csv(output / "table_06_kddtest_results.csv")), 8)
 
 
 if __name__ == "__main__":

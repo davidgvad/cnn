@@ -1,52 +1,101 @@
 # Rare-class intrusion detection on NSL-KDD
 
-This repository studies minority-guaranteed mini-batches, Class-Balanced Focal Loss, and class-specific score scaling across Conv2D, Conv1D, a feature-token Transformer, and MLP. The eight combinations form a complete 2×2×2 experiment. Rare Macro-F1 is the mean of R2L and U2R F1.
+Experiments with focal loss, minority-guaranteed batching, and score scaling across Conv2D, Conv1D, Transformer, and MLP. Rare Macro-F1 is the average of R2L and U2R F1.
 
 ## Setup
 
-Run commands from the repository root. Use Python 3.12, preferably the tested version 3.12.7.
+Use Linux, Python 3.12, and compatible NVIDIA GPUs. On a cluster, allocate GPUs through the scheduler first. Run these commands from the repository root in the same Bash session.
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r reproduction/requirements.txt
+python -m pip install -r requirements.txt
+
+set -euo pipefail
+experiment_results="results/factorial"
+device_args=(--gpus 0 1)
 ```
 
-For NVIDIA GPUs on Linux, install `reproduction/requirements-gpu.txt` instead. The pinned environment uses TensorFlow 2.16.2 and Keras 3.13.2. GPU execution needs hardware and drivers compatible with that environment. CPU execution is also supported. See [TensorFlow's installation guide](https://www.tensorflow.org/install/pip).
+This uses two GPUs. For one, set `device_args=(--gpus 0)`. IDs refer to the GPUs visible in your allocation. The `_4gpu.py` filenames do not require four GPUs. Training stops if no GPU is available.
 
-Both raw datasets are included in `data/`. The launcher checks their hashes before training. Paths, devices, and worker counts are command-line arguments.
+Both datasets are included in `data/`. Defaults are three seeds (0, 1, 2), four training folds, 25 epochs, and batch size 256. Run the steps below in order. The full workflow trains 1,056 models.
 
-## Reproduce the tables with the paper's parameters
+## 1. Search focal-loss parameters
+
+Each backbone tests 18 pairs: β ∈ {0.99, 0.999, 0.9999} and γ ∈ {0.25, 0.5, 0.75, 1, 1.5, 2}. Settings are selected using held-out predictions from KDDTrain+ only, called out-of-fold (OOF) predictions.
 
 ```bash
-python reproduction/reproduce.py --stage plan --device cpu
-python reproduction/reproduce.py --stage all --device cpu --workers 2 --output-dir runs/paper
+for backbone in conv2d conv1d transformer mlp; do
+    python "src/tune_${backbone}_focal_cv_4gpu.py" \
+        --results-dir "$experiment_results" "${device_args[@]}"
+done
 ```
 
-This performs 192 OOF fits and 48 final fits, then exports all nine tables and compares them with the supplied references. Settings are in [reproduction/paper_config.json](reproduction/paper_config.json). Each fit uses 25 epochs and batch size 256, with four OOF folds and training seeds 0, 1, and 2.
+## 2. Get predictions for the other training settings
 
-To use two allocated GPUs, replace `--device cpu --workers 2` with `--device gpu --gpus 0 1`. GPU IDs are logical IDs within `CUDA_VISIBLE_DEVICES`. Each worker trains one model. Use `--device auto` to detect available TensorFlow GPUs or fall back to CPU.
-
-## Repeat parameter selection
+Load each backbone's chosen focal parameters, then train baseline, batching only, and focal + batching. The shared runner supports all four backbones.
 
 ```bash
-python reproduction/reproduce.py --stage search-all --device cpu --workers 2 --output-dir runs/search
-python reproduction/reproduce.py --stage final --config runs/search/selected_config.json --device cpu --workers 2 --output-dir runs/search
-python reproduction/reproduce.py --stage tables --config runs/search/selected_config.json --output-dir runs/search
-python reproduction/reproduce.py --stage compare --output-dir runs/search
+for backbone in conv2d conv1d transformer mlp; do
+    read -r beta gamma < <(
+        python - "$experiment_results/${backbone}_focal_stage1_latest.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+pointer = Path(sys.argv[1])
+record = json.loads(pointer.read_text())
+best = json.loads((pointer.parent / Path(record["best_config"]).name).read_text())
+print(best["beta"], best["focal_gamma"])
+PY
+    )
+    for mode in baseline_ce baseline_batch focal_balanced; do
+        python src/tune_conv2d_score_scaling_cv_4gpu.py \
+            --architecture "$backbone" --training-mode "$mode" \
+            --cb-beta "$beta" --focal-gamma "$gamma" \
+            --coefficient-values 1.0 \
+            --results-dir "$experiment_results" "${device_args[@]}"
+    done
+done
 ```
 
-This repeats the focal grid, trains the remaining OOF regimes, selects score coefficients from OOF predictions, freezes the new configuration, and evaluates KDDTest+. New selections can differ from the historical choices. The [reproduction guide](reproduction/README.md) gives the search spaces, individual stages, outputs, and resume instructions.
+## 3. Search score-scaling parameters
 
-Fresh training does not guarantee identical scores across hardware and software. Original saved predictions reproduced the reference metrics, and the historical full MLP search has been recovered and checked. A complete fresh repetition of all paper fits remains pending. [VALIDATION.md](reproduction/VALIDATION.md) records the completed checks and numerical corrections.
+Search 576 R2L/U2R coefficient pairs for each backbone and training setting using the saved OOF predictions. This saves the selected parameters before KDDTest+ evaluation.
 
-## Files
+```bash
+python src/tune_variant_specific_score_scaling.py \
+    --results-dir "$experiment_results" select
+```
 
-- `src/` contains the models, preprocessing, training, searches, and table exporter.
-- `reproduction/` contains the launcher, fixed settings, requirements, and reference tables.
-- `tests/` checks hardware selection, metrics, parameter selection, and artifact handling.
-- `data/` contains KDDTrain+ and KDDTest+.
+## 4. Train final models and evaluate KDDTest+
 
-New outputs go under the chosen run directory. Original server prediction files are not bundled.
+Train on all KDDTrain+ using the saved parameters, then evaluate raw and scaled predictions. This produces all eight combinations of the three controls.
 
-Shared code originated in **Network Intrusion Detection with CNN and CTGAN-Synthetic Data**, credited to **Leo Martinez III**, Fall 2024–Spring 2025. The present study uses four backbones without synthetic data.
+```bash
+python src/run_final_baseline_vs_full_kddtest_4gpu.py \
+    --results-dir "$experiment_results" "${device_args[@]}"
+
+python src/tune_variant_specific_score_scaling.py \
+    --results-dir "$experiment_results" evaluate
+```
+
+## 5. Generate tables and statistics
+
+Create all nine paper tables from the experiment outputs:
+
+```bash
+python src/export_paper_tables.py \
+    --results-dir "$experiment_results" --output-dir tables/factorial
+```
+
+Outputs:
+
+- `results/factorial/`: predictions, training logs, parameter rankings, selected parameters, and per-seed metrics.
+- `tables/factorial/`: nine tables in CSV and LaTeX, unrounded metric summaries, and marginal contrasts and interactions.
+
+Rerun the same command to resume completed fits. Use a new output directory when changing code or settings. Run tests with `python -m unittest discover -s tests`.
+
+Hardware and software changes can affect scores and parameter choices. The original MLP search used a different TensorFlow environment from its later table-producing run. A full fresh run of this workflow is still pending.
+
+Shared code originated in *Network Intrusion Detection with CNN and CTGAN-Synthetic Data* by Leo Martinez III (2024–2025). This study uses no synthetic data.

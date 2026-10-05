@@ -6,8 +6,7 @@ and 25 epochs with shuffled batches. KDDTest+ and synthetic rows are not used.
 
 Preprocessing fits on training folds only. Held-out probabilities are joined
 in the original row order before calculating each seed's metrics and the
-mean and sample standard deviation across seeds. Fits run in separate CPU
-or GPU workers. Completed artifacts are checked and reused.
+mean and sample standard deviation across seeds. Fits run in separate GPU workers. Completed artifacts are checked and reused.
 """
 
 from __future__ import annotations
@@ -346,7 +345,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         validation_indices = np.asarray(artifact["validation_indices"], dtype=np.int64)
 
     visible_gpus = tf.config.list_physical_devices("GPU")
-    runtime.validate_worker_devices(visible_gpus, allow_cpu=args.allow_cpu)
+    runtime.validate_worker_devices(visible_gpus)
     for device in visible_gpus:
         try:
             tf.config.experimental.set_memory_growth(device, True)
@@ -477,7 +476,7 @@ def run_training_worker(args: argparse.Namespace) -> None:
         "assigned_gpu": os.environ.get("EXPERIMENT_GPU_ID", ""),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "tensorflow_visible_gpu_count": len(visible_gpus),
-        "runtime_device": "cpu" if args.allow_cpu else "gpu",
+        "runtime_device": "gpu",
         "deterministic_ops_requested": bool(args.deterministic_ops),
         "deterministic_ops_enabled": deterministic_enabled,
         "tensorflow_version": core.package_version("tensorflow"),
@@ -629,8 +628,6 @@ def build_worker_command(
         "--fit-verbose",
         str(args.fit_verbose),
     ]
-    if args.allow_cpu:
-        command.append("--allow-cpu")
     if args.deterministic_ops:
         command.append("--deterministic-ops")
     return command
@@ -976,7 +973,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script_path = Path(__file__).resolve()
     parser = argparse.ArgumentParser(
-        description=("CPU/GPU, four-fold Conv2D focal beta/gamma tuning on KDDTrain+.")
+        description=("GPU, four-fold Conv2D focal beta/gamma tuning on KDDTrain+.")
     )
     add_arguments(parser)
     args = parser.parse_args()
