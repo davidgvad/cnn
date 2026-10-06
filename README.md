@@ -99,8 +99,11 @@ Rerun the same command to resume completed fits. Use a new output directory when
 
 ## Reproducibility note
 
+Model training requires at least one compatible NVIDIA GPU. The GPU count is configurable with --gpus. Score-scaling selection and table generation do not require a GPU.
+
 Training randomness and differences in hardware or software can affect scores and parameter rankings. Some top candidates score very closely. For instance in our freshly reproduced run, the top two settings in the fresh Conv2D focal search differed by 0.10 percentage points in OOF Rare Macro-F1.
 
 Comparing the original experiment with one reproduced completed fresh run, **3 of 4 focal (β, γ) pairs** and **7 of 16 score-scaling (R2L, U2R) coefficient pairs** matched exactly. The other differences between top candidates were also razor close. However, to reiterate, different hyperparameters being selected is not inherently a reproduction failure. Although exact configuration rankings differed, the main thesis for our paper holds up. 
 
 To be more specific, both runs supported the same broad finding: batching had a positive KDDTest+ marginal contrast in every backbone, and every backbone's test winner included it. The best addition to batching varied by backbone and evaluation setting. The highest test architecture mean came from focal + batching originally and batching + scaling in the fresh run. In the end, both winners include batching, consistent with the paper's practical conclusion: establish reliable rare-class exposure first, then assess additional controls for the particular pipeline.
+
