@@ -96,6 +96,11 @@ Outputs:
 
 Rerun the same command to resume completed fits. Use a new output directory when changing code or settings. Run tests with `python -m unittest discover -s tests`.
 
-Hardware and software changes can affect scores and parameter choices. The original MLP search used a different TensorFlow environment from its later table-producing run. A full fresh run of this workflow is still pending.
 
-Shared code originated in *Network Intrusion Detection with CNN and CTGAN-Synthetic Data* by Leo Martinez III (2024–2025). This study uses no synthetic data.
+## Reproducibility note
+
+Training randomness and differences in hardware or software can affect scores and parameter rankings. Some candidates score closely: the top two settings in the fresh Conv2D focal search differed by 0.10 percentage points in OOF Rare Macro-F1. Differences between candidates are not always this small.
+
+Comparing the original experiment with one reproduced completed fresh run, **3 of 4 focal (β, γ) pairs** and **7 of 16 score-scaling (R2L, U2R) coefficient pairs** matched exactly. The other differences were also razor close. 
+
+However, regardelss of small hyper-param search differences, both runs supported the same broad finding: batching had a positive KDDTest+ marginal contrast in every backbone, and every backbone's test winner included it. The best addition to batching varied by backbone and evaluation setting. The highest test architecture mean came from focal + batching originally and batching + scaling in the fresh run. In the end, both winners include batching, consistent with the paper's practical conclusion: establish reliable rare-class exposure first, then assess additional controls for the particular pipeline.

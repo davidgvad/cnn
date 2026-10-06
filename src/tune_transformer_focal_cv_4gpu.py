@@ -1,16 +1,15 @@
-"""Tune Transformer focal loss using four-fold KDDTrain+ OOF predictions.
+"""Tune Transformer focal loss using four fold kddtrain+ OOF predictions.
 
 The default grid combines beta values 0.99, 0.999, and 0.9999 with gamma
 values 0.25, 0.5, 0.75, 1.0, 1.5, and 2.0. Each pair uses seeds 0, 1, and 2
-and 25 epochs with shuffled batches. KDDTest+ and synthetic rows are not used.
+and 25 epochs with shuffled batches. kddtest+ and synthetic rows are not used.
 
-Preprocessing fits on training folds only. Held-out probabilities are joined
+preprocessing fits on training folds only. Held-out probabilities are joined
 in the original row order before calculating each seed's metrics and the
 mean and sample standard deviation across seeds. Fits run in separate GPU workers. Completed artifacts are checked and reused.
 """
 
 from __future__ import annotations
-
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -24,14 +23,10 @@ import sys
 import threading
 import time
 from typing import Any, Dict, List, Sequence
-
 import numpy as np
 import pandas as pd
-
 import run_no_ctgan_model_ablation_4gpu as core
 import experiment_runtime as runtime
-
-
 SCHEMA_VERSION = 1
 FOLD_COUNT = 4
 DEFAULT_FOLD_SEED = 0

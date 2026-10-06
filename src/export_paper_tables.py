@@ -1,4 +1,4 @@
-"""Format experiment summaries and calculate architecture and factorial statistics"""
+"""format experiment summaries and calculate architecture and factorial statistics"""
 from __future__ import annotations
 
 import argparse

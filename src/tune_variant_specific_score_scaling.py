@@ -1,8 +1,8 @@
-"""Select R2L/U2R score coefficients from saved KDDTrain+ OOF predictions.
+"""Select R2L/U2R score coefficients from saved kddtrain+ OOF predictions.
 
 Select a separate pair for each backbone and training regime: baseline,
-focal loss, minority-guaranteed batches, and focal loss plus batching.
-The evaluate command applies those frozen pairs to saved KDDTest+ scores.
+focal loss, minority guaranteed batches, and focal loss plus batching.
+The evaluate command applies those frozen pairs to saved kddtest+ scores.
 This script does not train models or use test results for selection.
 
 Run from the repository root:
@@ -11,16 +11,13 @@ Run from the repository root:
 """
 
 from __future__ import annotations
-
 import argparse
 import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
-
 import numpy as np
 import pandas as pd
-
 import run_no_ctgan_model_ablation_4gpu as core
 import tune_conv2d_score_scaling_cv_4gpu as scaling
 

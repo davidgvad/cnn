@@ -1,6 +1,5 @@
 """GPU allocation changes scheduling without changing scientific settings"""
 from __future__ import annotations
-
 import argparse
 from contextlib import redirect_stderr
 import io

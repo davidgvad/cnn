@@ -1,12 +1,12 @@
-"""Train the final models on KDDTrain+ and evaluate them on KDDTest+.
+"""Train the final models on kddtrain+ and evaluate them on kddtest+.
 
 Focal parameters and score coefficients are frozen before test evaluation.
 Each architecture and seed trains on all training rows, with no test-based
 tuning, checkpoints, or model selection.
 
 The supported variants use cross-entropy or focal loss, ordinary or
-minority-guaranteed batches, and raw or scaled class scores. Independent fits
-run on the configured GPU workers.
+minority guaranteed batches, and raw or scaled class scores. Independent fits
+run on the configured gpu workers.
 """
 
 from __future__ import annotations
